@@ -199,11 +199,12 @@ fn drawing_file_name(markdown: &Path, id: &str) -> String {
     if safe == id && !safe.is_empty() {
         format!("{stem}.{safe}.png")
     } else {
-        // FNV-1a: short, dependency-free, and only has to tell ids apart.
+        // FNV-1a, all 64 bits: dependency-free, and wide enough that two ids
+        // with the same sanitised form do not share a file in practice.
         let hash = id.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
             (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
         });
-        format!("{stem}.{safe}.{:06x}.png", hash & 0xff_ffff)
+        format!("{stem}.{safe}.{hash:016x}.png")
     }
 }
 
@@ -305,6 +306,11 @@ mod tests {
         assert_eq!(
             dotted,
             drawing_file_name(Path::new("/tmp/questions.md"), "a.b")
+        );
+        // Same sanitised form, different ids: still different files.
+        assert_ne!(
+            drawing_file_name(Path::new("/tmp/questions.md"), "a.b$b]b}z"),
+            drawing_file_name(Path::new("/tmp/questions.md"), "a!b#b?b#z")
         );
         // An untouched id can never spell the hashed form of another one.
         let hashed = dotted
