@@ -4,8 +4,16 @@ const { invoke } = window.__TAURI__.core;
 
 const form = document.getElementById("questions");
 const statusLine = document.getElementById("status");
+const submitButton = document.getElementById("submit");
+
+// Prefix that turns a path relative to the Markdown file into a URL (set by `load`).
+let mediaBase = "";
 
 // One entry per question: how to read its answer back out of the form.
+// `collect` returns the answer, null when unanswered, or throws with a message
+// when what is there is not a valid answer. `drawing`, when present, returns
+// the PNG (as a data URL) to save with the answer, or null when nothing new
+// was drawn; the Rust side writes it and fills in the answer's `path`.
 const collectors = [];
 
 function element(tag, attributes = {}, children = []) {
@@ -15,7 +23,13 @@ function element(tag, attributes = {}, children = []) {
     else if (value === true) node.setAttribute(key, "");
     else if (value !== false && value != null) node.setAttribute(key, value);
   }
-  for (const child of children) node.append(child);
+  for (const child of children) if (child != null) node.append(child);
+  return node;
+}
+
+function button(text, onClick, attributes = {}) {
+  const node = element("button", { type: "button", ...attributes, text });
+  node.addEventListener("click", onClick);
   return node;
 }
 
@@ -26,14 +40,68 @@ function trustedHtml(html) {
   return holder;
 }
 
+// Media paths in the YAML are relative to the Markdown file, like those in the
+// prose; the Rust side rewrites the prose, this does the same for questions.
+// A path here is a file name, never a URL: `#`, `%` and `:` in it are literal
+// (`frame:1.png` is a file, not a scheme).
+function mediaUrl(src) {
+  return mediaBase + src.replace(/^\.\//, "").split("/").map(encodeURIComponent).join("/");
+}
+
+function mediaKind(src) {
+  const extension = (src.match(/\.([a-z0-9]+)$/i)?.[1] ?? "").toLowerCase();
+  if (["mp4", "m4v", "webm", "mov", "ogv", "mkv"].includes(extension)) return "video";
+  if (["mp3", "m4a", "wav", "ogg", "oga", "aac", "flac", "opus"].includes(extension)) return "audio";
+  return "image";
+}
+
+function mediaElement(src, attributes = {}) {
+  const kind = mediaKind(src);
+  if (kind === "image") return element("img", { src: mediaUrl(src), alt: src });
+  const media = element(kind, { src: mediaUrl(src), preload: "auto", ...attributes });
+  if (kind === "video") showFirstFrame(media);
+  return media;
+}
+
+// WebKit paints nothing until the video is played or seeked, which leaves the
+// frame to click on (or to pick) blank. A seek by a hair makes it paint.
+function showFirstFrame(video) {
+  video.addEventListener("loadedmetadata", () => {
+    if (video.currentTime === 0) video.currentTime = 0.001;
+  });
+}
+
+function optionValue(option) {
+  return typeof option === "string" ? option : (option.value ?? option.label ?? option.src ?? "");
+}
+
+function optionLabel(option) {
+  return typeof option === "string" ? option : (option.label ?? optionValue(option));
+}
+
+// The `default` of a choice: the answer's shape (`{ selected: [...] }`), or for
+// convenience a value or a list of values.
+function selectedDefault(value) {
+  if (value == null) return [];
+  if (typeof value === "object" && !Array.isArray(value)) return (value.selected ?? []).map(String);
+  return Array.isArray(value) ? value.map(String) : [String(value)];
+}
+
+function formatTime(seconds) {
+  if (!Number.isFinite(seconds)) return "–";
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}:${(seconds - minutes * 60).toFixed(1).padStart(4, "0")}`;
+}
+
+const round = (value, places) => Number(value.toFixed(places));
+
 function renderChoice(segment, body) {
   const { question, id, previous } = segment;
   const type = question.multiple ? "checkbox" : "radio";
-  const selected = new Set(previous?.selected ?? []);
+  const selected = new Set(previous?.selected ?? selectedDefault(question.default));
   const list = element("div", { class: "options" });
   question.options.forEach((option, index) => {
-    const value = typeof option === "string" ? option : option.value ?? option.label ?? option.src ?? "";
-    const label = typeof option === "string" ? option : option.label ?? value;
+    const value = optionValue(option);
     const input = element("input", {
       type,
       name: id,
@@ -41,7 +109,16 @@ function renderChoice(segment, body) {
       id: `${id}-${index}`,
       checked: selected.has(value),
     });
-    list.append(element("label", { class: "option", for: `${id}-${index}` }, [input, element("span", { text: label })]));
+    const description = typeof option === "string" ? null : option.description;
+    list.append(
+      element("label", { class: "option", for: `${id}-${index}` }, [
+        input,
+        element("span", {}, [
+          element("span", { text: optionLabel(option) }),
+          description ? element("span", { class: "description", text: description }) : null,
+        ]),
+      ]),
+    );
   });
   body.append(list);
 
@@ -51,7 +128,7 @@ function renderChoice(segment, body) {
       type: "text",
       class: "other",
       placeholder: "Other…",
-      value: previous?.other ?? "",
+      value: previous?.other ?? question.default?.other ?? "",
     });
     body.append(other);
   }
@@ -78,9 +155,441 @@ function renderText(segment, body) {
   return () => (field.value.trim() === "" ? null : field.value);
 }
 
+function renderMediaChoice(segment, body) {
+  const { question, id, previous } = segment;
+  const type = question.multiple ? "checkbox" : "radio";
+  const selected = new Set(previous?.selected ?? selectedDefault(question.default));
+  const grid = element("div", { class: "media-options" });
+  question.options.forEach((option, index) => {
+    // A bare string is the file to show, and names the option too.
+    const src = typeof option === "string" ? option : option.src;
+    const value = optionValue(option);
+    const input = element("input", {
+      type,
+      name: id,
+      value,
+      id: `${id}-${index}`,
+      checked: selected.has(value),
+    });
+    const media = src ? mediaElement(src, { controls: true }) : null;
+    const card = element("div", { class: "media-option" }, [
+      media,
+      element("label", { class: "caption", for: `${id}-${index}` }, [
+        input,
+        element("span", {}, [
+          element("span", { text: optionLabel(option) }),
+          typeof option !== "string" && option.description
+            ? element("span", { class: "description", text: option.description })
+            : null,
+        ]),
+      ]),
+    ]);
+    // Clicking a picture picks it; video and audio keep their controls, so
+    // only their caption does.
+    if (media?.tagName === "IMG") {
+      media.addEventListener("click", () => {
+        input.checked = type === "radio" ? true : !input.checked;
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+    }
+    input.addEventListener("change", () => {
+      for (const node of grid.querySelectorAll(".media-option")) {
+        node.classList.toggle("selected", node.querySelector("input").checked);
+      }
+    });
+    card.classList.toggle("selected", input.checked);
+    grid.append(card);
+  });
+  body.append(grid);
+
+  return () => {
+    const values = [...form.querySelectorAll(`input[name="${CSS.escape(id)}"]:checked`)].map((input) => input.value);
+    return values.length ? { selected: values } : null;
+  };
+}
+
+// Play / pause, a seek bar and the time, for a video that must take clicks on
+// its picture (the native controls would take them instead).
+function videoControls(video) {
+  const play = button("▶", () => (video.paused ? video.play() : video.pause()), { class: "play" });
+  const seek = element("input", { type: "range", min: 0, max: 0, step: 0.01, value: 0, class: "seek" });
+  const time = element("span", { class: "time", text: "0:00.0 / –" });
+  let seeking = false;
+  const update = () => {
+    if (!seeking) seek.value = video.currentTime;
+    time.textContent = `${formatTime(video.currentTime)} / ${formatTime(video.duration)}`;
+    play.textContent = video.paused ? "▶" : "❚❚";
+  };
+  video.addEventListener("loadedmetadata", () => {
+    seek.max = video.duration;
+    update();
+  });
+  for (const event of ["timeupdate", "play", "pause", "seeked"]) video.addEventListener(event, update);
+  seek.addEventListener("pointerdown", () => (seeking = true));
+  for (const event of ["pointerup", "pointercancel", "change"]) seek.addEventListener(event, () => (seeking = false));
+  seek.addEventListener("input", () => {
+    video.currentTime = Number(seek.value);
+    update();
+  });
+  return element("div", { class: "controls" }, [play, seek, time]);
+}
+
+function renderPoint(segment, body) {
+  const { question, id, previous } = segment;
+  if (!question.src) return unusable(body, "a point question needs `src`");
+  const kind = mediaKind(question.src);
+  if (kind === "audio") return unusable(body, "a point question needs an image or a video");
+  const media = mediaElement(question.src, { playsinline: true });
+  const layer = element("div", { class: "markers" });
+  const stage = element("div", { class: "stage" }, [media, layer]);
+  const list = element("div", { class: "point-list" });
+  body.append(stage);
+  if (kind === "video") body.append(videoControls(media));
+
+  // A restored answer may have been edited by hand; whatever is not a list of
+  // points is treated as no points (what is there is checked at submit).
+  const restored = previous?.points ?? question.default?.points ?? [];
+  // Only the fields of this kind: a question that was a video may be a picture now.
+  let points = (Array.isArray(restored) ? restored : [])
+    .filter((point) => point != null && typeof point === "object")
+    .map(({ x, y, rx, ry, time }) => (kind === "video" ? { x, y, rx, ry, time } : { x, y, rx, ry }));
+  // A question that was multiple when it was answered may be single now.
+  if (!question.multiple) points = points.slice(0, 1);
+  const natural = () =>
+    kind === "video" ? [media.videoWidth, media.videoHeight] : [media.naturalWidth, media.naturalHeight];
+
+  const draw = () => {
+    layer.replaceChildren(
+      ...points.map((point, index) => {
+        const marker = element("div", {
+          class: "marker",
+          style: `left: ${point.rx * 100}%; top: ${point.ry * 100}%`,
+          title: `${point.x}, ${point.y}${point.time != null ? ` @ ${formatTime(point.time)}` : ""}`,
+        });
+        marker.addEventListener("click", (event) => {
+          event.stopPropagation();
+          points.splice(index, 1);
+          draw();
+        });
+        return marker;
+      }),
+    );
+    list.replaceChildren(
+      ...points.map((point) => {
+        const item = element("span", {
+          class: "point",
+          text: `(${point.x}, ${point.y})${point.time != null ? ` @ ${formatTime(point.time)}` : ""}`,
+        });
+        if (point.time != null) item.addEventListener("click", () => (media.currentTime = point.time));
+        return item;
+      }),
+    );
+  };
+
+  stage.addEventListener("click", (event) => {
+    const [width, height] = natural();
+    if (!width || !height) return;
+    const rect = media.getBoundingClientRect();
+    const rx = (event.clientX - rect.left) / rect.width;
+    const ry = (event.clientY - rect.top) / rect.height;
+    if (rx < 0 || rx > 1 || ry < 0 || ry > 1) return;
+    const point = {
+      x: Math.round(rx * width),
+      y: Math.round(ry * height),
+      rx: round(rx, 4),
+      ry: round(ry, 4),
+    };
+    if (kind === "video") point.time = round(media.currentTime, 2);
+    if (question.multiple) points.push(point);
+    else points = [point];
+    draw();
+  });
+
+  body.append(
+    element("div", { class: "tools" }, [
+      list,
+      button("Clear", () => {
+        points = [];
+        draw();
+      }),
+    ]),
+  );
+  draw();
+
+  return () => {
+    if (!points.length) return null;
+    const [width, height] = natural();
+    if (!width || !height) throw new Error(`${id}: the picture has not loaded, so the points cannot be placed`);
+    // A restored or default point is not trusted: it may have been edited by
+    // hand, or come from a clip that has since been replaced by a shorter one.
+    const inside = (value) => Number.isFinite(value) && value >= 0 && value <= 1;
+    if (!points.every((point) => inside(point.rx) && inside(point.ry))) {
+      throw new Error(`${id}: a point is outside the picture; mark it again`);
+    }
+    if (kind === "video") {
+      if (!Number.isFinite(media.duration)) throw new Error(`${id}: the video has not loaded, so the points cannot be checked`);
+      const bad = points.find((point) => !Number.isFinite(point.time) || point.time < 0 || point.time > media.duration + 0.05);
+      if (bad) throw new Error(`${id}: a point is at ${formatTime(bad.time)}, outside the video; mark it again`);
+    }
+    // rx / ry are what was marked; x / y follow the picture as it is now (a
+    // restored answer may come from a picture that has since been regenerated).
+    return {
+      width,
+      height,
+      points: points.map((point) => ({ ...point, x: Math.round(point.rx * width), y: Math.round(point.ry * height) })),
+    };
+  };
+}
+
+function renderDraw(segment, body) {
+  const { question, id, previous } = segment;
+  if (!question.src && !previous?.path && (question.width === 0 || question.height === 0)) {
+    return unusable(body, "a draw question needs a width and a height above zero");
+  }
+  const canvas = element("canvas", { class: "drawing" });
+  const context = canvas.getContext("2d");
+  const strokes = [];
+  let current = null;
+  let image = null;
+  // While the background is loading the canvas has a placeholder size, so a
+  // stroke made then would land in the wrong place once it is resized, and an
+  // export would lack the background. Nothing is accepted until it has loaded.
+  let loading = false;
+  // A background that failed to load is not replaced by a blank sheet: a
+  // drawing without it would answer a different question.
+  let failed = null;
+
+  const paint = (stroke, from = 0) => {
+    context.strokeStyle = stroke.color;
+    context.fillStyle = stroke.color;
+    context.lineWidth = stroke.width;
+    context.lineCap = "round";
+    context.lineJoin = "round";
+    if (stroke.points.length === 1) {
+      const [point] = stroke.points;
+      context.beginPath();
+      context.arc(point.x, point.y, stroke.width / 2, 0, Math.PI * 2);
+      context.fill();
+      return;
+    }
+    context.beginPath();
+    context.moveTo(stroke.points[Math.max(from - 1, 0)].x, stroke.points[Math.max(from - 1, 0)].y);
+    for (const point of stroke.points.slice(from)) context.lineTo(point.x, point.y);
+    context.stroke();
+  };
+  const repaint = () => {
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    if (image) context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    else {
+      // A blank sheet is white: a transparent PNG shows as black in many viewers.
+      context.fillStyle = "#fff";
+      context.fillRect(0, 0, canvas.width, canvas.height);
+    }
+    for (const stroke of strokes) paint(stroke);
+  };
+  const size = () => {
+    canvas.width = image ? image.naturalWidth : (question.width ?? 800);
+    canvas.height = image ? image.naturalHeight : (question.height ?? 600);
+    repaint();
+  };
+
+  // An earlier drawing already has the background in it, so it is the
+  // background now, and new strokes go on top.
+  const background = previous?.path ?? question.src;
+  if (background) {
+    loading = true;
+    canvas.classList.add("loading");
+    image = new Image();
+    // Without this the canvas is tainted by the picture (it comes from another
+    // origin) and cannot be exported.
+    image.crossOrigin = "anonymous";
+    const ready = () => {
+      loading = false;
+      canvas.classList.remove("loading");
+      size();
+    };
+    image.addEventListener("load", ready);
+    image.addEventListener("error", () => {
+      failed = `${id}: could not load ${background}`;
+      statusLine.textContent = failed;
+    });
+    image.src = mediaUrl(background);
+  }
+  size();
+
+  const color = element("input", { type: "color", value: "#e0245e", title: "Pen colour" });
+  const width = element("select", { title: "Pen width" });
+  for (const option of [2, 4, 8, 16]) width.append(element("option", { value: option, text: `${option}px`, selected: option === 4 }));
+
+  const position = (event) => {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: ((event.clientX - rect.left) * canvas.width) / rect.width,
+      y: ((event.clientY - rect.top) * canvas.height) / rect.height,
+    };
+  };
+  canvas.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 || loading) return;
+    canvas.setPointerCapture(event.pointerId);
+    current = { color: color.value, width: Number(width.value), points: [position(event)] };
+    strokes.push(current);
+    paint(current);
+  });
+  canvas.addEventListener("pointermove", (event) => {
+    if (!current) return;
+    current.points.push(position(event));
+    paint(current, current.points.length - 1);
+  });
+  for (const event of ["pointerup", "pointercancel"]) canvas.addEventListener(event, () => (current = null));
+
+  body.append(
+    element("div", { class: "tools" }, [
+      color,
+      width,
+      button("Undo", () => {
+        strokes.pop();
+        repaint();
+      }),
+      button("Clear", () => {
+        strokes.length = 0;
+        repaint();
+      }),
+    ]),
+    canvas,
+  );
+
+  return {
+    collect: () => {
+      if (failed) {
+        if (question.required) throw new Error(failed);
+        return null;
+      }
+      if (loading) throw new Error(`${id}: the background is still loading`);
+      if (strokes.length) return { width: canvas.width, height: canvas.height };
+      // Nothing added: the earlier picture is still the answer, as it is on disk.
+      return previous?.path ? previous : null;
+    },
+    drawing: () => (strokes.length ? canvas.toDataURL("image/png") : null),
+  };
+}
+
+function renderColor(segment, body) {
+  const { question, id, previous } = segment;
+  const valid = (value) => /^#[0-9a-f]{6}$/i.test(value);
+  const initial = String(previous ?? question.default ?? "");
+  const picker = element("input", { type: "color", value: valid(initial) ? initial : "#000000" });
+  const text = element("input", { type: "text", class: "color-text", placeholder: "#rrggbb", value: initial });
+  picker.addEventListener("input", () => (text.value = picker.value));
+  text.addEventListener("input", () => {
+    if (valid(text.value.trim())) picker.value = text.value.trim().toLowerCase();
+  });
+  body.append(element("div", { class: "tools" }, [picker, text]));
+  return () => {
+    const value = text.value.trim();
+    if (!value) return null;
+    if (!valid(value)) throw new Error(`${id}: a colour is written as #rrggbb`);
+    return value.toLowerCase();
+  };
+}
+
+function renderRange(segment, body) {
+  const { question, id, previous } = segment;
+  if (!question.src || mediaKind(question.src) === "image") {
+    return unusable(body, "a range question needs an audio or video `src`");
+  }
+  const media = mediaElement(question.src, { controls: true });
+  const fill = element("div", { class: "fill" });
+  const bar = element("div", { class: "span-bar" }, [fill]);
+  const initial = previous ?? question.default ?? {};
+
+  const fields = {};
+  const rows = ["start", "end"].map((name) => {
+    const field = element("input", { type: "number", class: "seconds", min: 0, step: 0.1 });
+    if (initial[name] != null) field.value = initial[name];
+    field.addEventListener("input", showSpan);
+    fields[name] = field;
+    const nudge = (delta) =>
+      button(`${delta > 0 ? "+" : ""}${delta}`, () => {
+        field.value = round(Math.max(0, (Number(field.value) || 0) + delta), 1);
+        media.currentTime = Number(field.value);
+        showSpan();
+      });
+    return element("div", { class: "range-row" }, [
+      element("span", { class: "range-label", text: name }),
+      field,
+      element("span", { text: "s" }),
+      button("Use current time", () => {
+        field.value = round(media.currentTime, 1);
+        showSpan();
+      }),
+      nudge(-0.5),
+      nudge(-0.1),
+      nudge(0.1),
+      nudge(0.5),
+    ]);
+  });
+
+  function showSpan() {
+    const duration = media.duration;
+    const start = Number(fields.start.value);
+    const end = Number(fields.end.value);
+    if (!Number.isFinite(duration) || !duration || fields.start.value === "" || fields.end.value === "" || end <= start) {
+      fill.style.display = "none";
+      return;
+    }
+    fill.style.display = "";
+    fill.style.left = `${(Math.min(start, duration) / duration) * 100}%`;
+    fill.style.width = `${((Math.min(end, duration) - Math.min(start, duration)) / duration) * 100}%`;
+  }
+  media.addEventListener("loadedmetadata", showSpan);
+
+  let stopAt = null;
+  media.addEventListener("timeupdate", () => {
+    if (stopAt != null && media.currentTime >= stopAt) {
+      media.pause();
+      stopAt = null;
+    }
+  });
+  media.addEventListener("pause", () => (stopAt = null));
+  const play = button("Play the range", () => {
+    if (fields.start.value === "" || fields.end.value === "") return;
+    media.currentTime = Number(fields.start.value);
+    stopAt = Number(fields.end.value);
+    media.play();
+  });
+
+  body.append(media, bar, ...rows, element("div", { class: "tools" }, [play]));
+
+  return () => {
+    if (fields.start.value === "" && fields.end.value === "") return null;
+    if (fields.start.value === "" || fields.end.value === "") throw new Error(`${id}: both start and end are needed`);
+    const start = Number(fields.start.value);
+    const end = Number(fields.end.value);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0) {
+      throw new Error(`${id}: start and end are seconds from the beginning`);
+    }
+    if (!(end > start)) throw new Error(`${id}: end must be after start`);
+    if (!Number.isFinite(media.duration)) throw new Error(`${id}: the media has not loaded, so the range cannot be checked`);
+    if (end > media.duration + 0.05) throw new Error(`${id}: end is past the end of the media (${formatTime(media.duration)})`);
+    return { start, end, duration: round(media.duration, 2) };
+  };
+}
+
+// A question whose YAML cannot be turned into an input. It is shown as such,
+// and if it is required it blocks the submit, as any unanswered question would.
+function unusable(body, problem) {
+  body.append(element("p", { class: "unsupported", text: problem }));
+  return { unusable: problem };
+}
+
 const renderers = {
   choice: renderChoice,
   text: renderText,
+  "media-choice": renderMediaChoice,
+  point: renderPoint,
+  draw: renderDraw,
+  color: renderColor,
+  range: renderRange,
 };
 
 function renderQuestion(segment) {
@@ -101,13 +610,31 @@ function renderQuestion(segment) {
     body.append(element("p", { class: "unsupported", text: `"${segment.question.type}" questions are not supported yet.` }));
     return card;
   }
-  const collect = render(segment, body);
-  collectors.push({ id: segment.id, required: segment.question.required, card, collect });
+  let result;
+  try {
+    result = render(segment, body);
+  } catch (error) {
+    // One question that cannot be built must not take the whole page down.
+    result = unusable(body, `could not show this question: ${error.message ?? error}`);
+  }
+  const { collect, drawing } =
+    typeof result === "function"
+      ? { collect: result }
+      : result.unusable
+        ? {
+            collect: () => {
+              if (segment.question.required) throw new Error(`${segment.id}: ${result.unusable}`);
+              return null;
+            },
+          }
+        : result;
+  collectors.push({ id: segment.id, required: segment.question.required, card, collect, drawing });
   return card;
 }
 
 async function load() {
   const view = await invoke("document");
+  mediaBase = view.media_base;
   document.getElementById("path").textContent = view.path;
   form.replaceChildren(
     ...view.segments.map((segment) => (segment.kind === "prose" ? trustedHtml(segment.html) : renderQuestion(segment))),
@@ -116,31 +643,56 @@ async function load() {
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
-  const answers = {};
-  const missing = [];
-  for (const { id, required, card, collect } of collectors) {
-    const value = collect();
-    card.classList.toggle("missing", required && value == null);
-    if (value != null) answers[id] = value;
-    else if (required) missing.push(id);
-  }
-  if (missing.length) {
-    statusLine.textContent = `Required: ${missing.join(", ")}`;
-    form.querySelector(".missing")?.scrollIntoView({ behavior: "smooth", block: "center" });
-    return;
-  }
+  submitButton.disabled = true;
+  statusLine.textContent = "";
   try {
-    await invoke("submit", { answers });
+    const answers = {};
+    const drawings = {};
+    const problems = [];
+    for (const collector of collectors) {
+      const { id, required, card, collect, drawing } = collector;
+      let value = null;
+      try {
+        value = collect();
+      } catch (error) {
+        problems.push(error.message ?? String(error));
+        card.classList.add("missing");
+        continue;
+      }
+      card.classList.toggle("missing", required && value == null);
+      if (value == null) {
+        if (required) problems.push(`${id} is required`);
+        continue;
+      }
+      answers[id] = value;
+      const png = drawing?.();
+      if (png) drawings[id] = png;
+    }
+    if (problems.length) {
+      statusLine.textContent = problems.join(" · ");
+      form.querySelector(".missing")?.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
+    await invoke("submit", { answers, drawings });
   } catch (error) {
     statusLine.textContent = String(error);
+  } finally {
+    submitButton.disabled = false;
   }
 });
 
 document.getElementById("cancel").addEventListener("click", () => invoke("cancel"));
 
-// Links go nowhere inside the app window; opening them in the browser is still to be done.
+// Links open in the browser; the window itself never navigates away.
 document.addEventListener("click", (event) => {
-  if (event.target.closest("a[href]")) event.preventDefault();
+  const link = event.target.closest("a[href]");
+  if (!link) return;
+  const href = link.getAttribute("href");
+  if (href.startsWith("#")) return;
+  event.preventDefault();
+  if (/^https?:\/\//i.test(href)) {
+    invoke("open_link", { url: href }).catch((error) => (statusLine.textContent = String(error)));
+  }
 });
 
 load().catch((error) => {

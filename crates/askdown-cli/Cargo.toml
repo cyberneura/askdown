@@ -16,6 +16,11 @@ serde.workspace = true
 serde_json.workspace = true
 clap = { version = "4", features = ["derive"] }
 tauri = "2"
+base64 = "0.22"
+# Opens links in the system browser. The opener plugin would do the same through
+# `open`, with a permission system this app does not use.
+open = "5"
+percent-encoding = "2"
 
 [build-dependencies]
 tauri-build = "2"

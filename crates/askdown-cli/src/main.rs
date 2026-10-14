@@ -104,7 +104,11 @@ fn print_list(session: &Session) {
             }
             Err(error) => format!("invalid: {}", error.lines().next().unwrap_or("")),
         };
-        let answered = if block.answer_range.is_some() { " (answered)" } else { "" };
+        let answered = if block.answer_range.is_some() {
+            " (answered)"
+        } else {
+            ""
+        };
         println!("[{}] {}: {summary}{answered}", block.number, block.id());
     }
 }

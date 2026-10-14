@@ -4,4 +4,5 @@
 //! integration tests can use it.
 
 pub mod gui;
+pub mod media;
 pub mod session;
