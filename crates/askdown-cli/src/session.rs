@@ -62,12 +62,14 @@ impl Session {
     /// the record, and a picture must not replace the one an earlier answer
     /// refers to unless the new answer was written.
     pub fn stage_file(&self, name: &str, bytes: &[u8]) -> io::Result<Staged> {
-        if name.is_empty() || name.contains(['/', '\\']) {
+        if name.is_empty() || name.chars().any(std::path::is_separator) {
             return Err(io::Error::other(format!("{name:?} is not a file name")));
         }
         // The one thing a rename cannot replace. Found out now, before the
-        // answer that refers to the file is written.
-        if self.base_dir().join(name).is_dir() {
+        // answer that refers to the file is written. A symlink to a directory
+        // is fine: the rename swaps out the link itself.
+        let in_the_way = self.base_dir().join(name).symlink_metadata();
+        if in_the_way.is_ok_and(|metadata| metadata.is_dir()) {
             return Err(io::Error::other(format!("{name} is a directory")));
         }
         let temporary = self

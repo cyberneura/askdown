@@ -424,6 +424,35 @@ mod tests {
         assert_eq!(std::fs::read(&saved).unwrap(), b"\x89PNG\r\n\x1a\n");
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_to_a_directory_is_replaced_like_any_other_link() {
+        let dir = scratch("dirlink");
+        std::fs::create_dir(dir.join("folder")).unwrap();
+        std::os::unix::fs::symlink(dir.join("folder"), dir.join("q.sketch.png")).unwrap();
+        let mut session = Session::load(&dir.join("q.md")).unwrap();
+        commit(&mut session, true, &mut answer(), &drawing()).unwrap();
+        assert!(
+            dir.join("q.sketch.png")
+                .symlink_metadata()
+                .unwrap()
+                .is_file()
+        );
+        assert!(dir.join("folder").is_dir());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_backslash_in_the_markdown_name_is_just_a_character() {
+        let dir = scratch("backslash");
+        std::fs::rename(dir.join("q.md"), dir.join("re\\view.md")).unwrap();
+        let mut session = Session::load(&dir.join("re\\view.md")).unwrap();
+        let mut answers = answer();
+        commit(&mut session, true, &mut answers, &drawing()).unwrap();
+        assert_eq!(answers.0["sketch"]["path"], "re\\view.sketch.png");
+        assert!(dir.join("re\\view.sketch.png").is_file());
+    }
+
     #[test]
     fn a_directory_in_the_way_is_refused_before_the_markdown_is_written() {
         let dir = scratch("directory");
