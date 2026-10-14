@@ -2,6 +2,7 @@
 
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use askdown_core::{AnswerSet, Document, parse, write_back};
 
@@ -72,9 +73,14 @@ impl Session {
         if in_the_way.is_ok_and(|metadata| metadata.is_dir()) {
             return Err(io::Error::other(format!("{name} is a directory")));
         }
-        let temporary = self
-            .base_dir()
-            .join(format!(".{name}.askdown-{}", std::process::id()));
+        // Short and unrelated to `name`, so that a name near the file system's
+        // limit is not pushed over it by a prefix.
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let temporary = self.base_dir().join(format!(
+            ".askdown-{}-{}.tmp",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
         std::fs::write(&temporary, bytes)?;
         Ok(Staged {
             temporary,

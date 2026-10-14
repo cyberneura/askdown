@@ -454,6 +454,18 @@ mod tests {
     }
 
     #[test]
+    fn a_name_near_the_file_system_limit_still_goes_through_staging() {
+        let dir = scratch("long");
+        let id = "a".repeat(240);
+        let mut answers = AnswerSet([(id.clone(), json!({}))].into_iter().collect());
+        let drawings = HashMap::from([(id.clone(), "iVBORw0KGgo=".to_string())]);
+        let mut session = Session::load(&dir.join("q.md")).unwrap();
+        commit(&mut session, false, &mut answers, &drawings).unwrap();
+        assert!(dir.join(format!("q.{id}.png")).is_file());
+        assert!(no_temporaries(&dir));
+    }
+
+    #[test]
     fn a_directory_in_the_way_is_refused_before_the_markdown_is_written() {
         let dir = scratch("directory");
         std::fs::create_dir(dir.join("q.sketch.png")).unwrap();
