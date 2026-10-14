@@ -62,7 +62,9 @@ impl ChoiceOption {
     pub fn label(&self) -> &str {
         match self {
             ChoiceOption::Plain(text) => text,
-            ChoiceOption::Detailed { label, .. } => label.as_deref().unwrap_or_else(|| self.value()),
+            ChoiceOption::Detailed { label, .. } => {
+                label.as_deref().unwrap_or_else(|| self.value())
+            }
         }
     }
 }
@@ -103,6 +105,11 @@ pub struct Question {
     /// Pre-filled value.
     #[serde(default)]
     pub default: Option<serde_json::Value>,
+    /// For `draw` without `src`: the size of the blank canvas, in pixels.
+    #[serde(default)]
+    pub width: Option<u32>,
+    #[serde(default)]
+    pub height: Option<u32>,
 }
 
 impl Question {

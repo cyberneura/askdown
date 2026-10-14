@@ -81,7 +81,10 @@ fn closes(fence: &Fence, line: &str) -> bool {
     if line.len() - trimmed.len() > 3 {
         return false;
     }
-    let length = trimmed.bytes().take_while(|&byte| byte == fence.marker).count();
+    let length = trimmed
+        .bytes()
+        .take_while(|&byte| byte == fence.marker)
+        .count();
     length >= fence.length && trimmed[length..].trim().is_empty()
 }
 
@@ -114,7 +117,8 @@ pub fn parse(source: &str) -> Document {
         // The body runs to the closing fence, or to the end of the document when
         // there is none -- as CommonMark has it.
         let mut close = index + 1;
-        while close < lines.len() && !closes(&fence, lines[close].1.trim_end_matches(['\n', '\r'])) {
+        while close < lines.len() && !closes(&fence, lines[close].1.trim_end_matches(['\n', '\r']))
+        {
             close += 1;
         }
         let body_start = start + line.len();
@@ -208,7 +212,9 @@ mod tests {
         let document = parse(source);
         let range = document.blocks[0].answer_range.clone().unwrap();
         assert!(source[range].ends_with("<!-- /askdown:answer -->\n"));
-        assert!(matches!(document.segments.last(), Some(Segment::Prose(text)) if text.trim() == "After"));
+        assert!(
+            matches!(document.segments.last(), Some(Segment::Prose(text)) if text.trim() == "After")
+        );
     }
 
     #[test]

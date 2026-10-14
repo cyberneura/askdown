@@ -18,7 +18,7 @@ README・コードコメント・UI 文字列・エラーメッセージはす�
   選ばせる機能は作らない (四柳の指示)。`--list` は確認用の表示で、入力 UI ではない。
 - **コアは IO を持たない。** `askdown-core` はパース (`parse`)・質問の型 (`question`)・
   回答の書き戻し (`answer`)・Markdown → HTML (`markdown`) だけ。ファイルの読み書きは
-  `askdown` クレートの `session` が行う。
+  `askdown` クレートの `session` (Markdown と、その隣への書き込み) と `media` (読み出し) が行う。
 - **呼び出しはブロッキング。** エージェントは `askdown file.md` を実行して終了を待ち、
   stdout の JSON を読む。終了コードで回答 (0) / エラー (1) / キャンセル (2) / タイムアウト (3)
   を区別する。
@@ -37,48 +37,99 @@ README・コードコメント・UI 文字列・エラーメッセージはす�
   ハンドラを通さない。`<video>` / `<audio>` は質問の用途上許可している。
   フロントエンドはビルド工程を持たない素の JS (runandlog と同じ)。
 
+## ローカルファイルの表示 (`media.rs`)
+
+- **カスタム URI スキーム `askdown`** を `register_uri_scheme_protocol` で登録し、
+  Markdown ファイルのディレクトリ以下だけを返す。URL は macOS / Linux が
+  `askdown://localhost/<相対パス>`、Windows が `http://askdown.localhost/<相対パス>`
+  (`media::base_url`)。Tauri の asset protocol + scope でも書けるが、URL に絶対パスを
+  埋める必要があり、ディレクトリ境界の判定も自前で持ちたかったので自作した。
+- **境界は `resolve` の 1 箇所で守る。** `..` や絶対パスを含む要求は 403、`canonicalize` した
+  結果がディレクトリの外に出る (symlink) 場合も 403、無いファイルは 404。Markdown の
+  相対 URL を書き換える側 (`markdown::media_url`) は正規化しない (`..` は webview が URL を
+  解釈する時点で解決されるので、サーバーにはまず届かない)。判定はサーバーの 1 箇所だけ。
+- **守るのは「AI が書いた Markdown がディレクトリの外を指す」ことだけ。** 同じユーザーが
+  同じディレクトリで同時に symlink を差し替える TOCTOU や、外のファイルへの hard link は
+  ローカルツールの脅威モデル外 (そのユーザーは既にそのファイルを直接読み書きできる)。
+  Codex レビューで指摘されたが対応しない。
+- **`Range` ヘッダ (単一範囲) に対応する。** WKWebView は動画のシークで範囲要求を出す。
+  複数範囲はメディアプレイヤーが出さないので未対応。
+- **レスポンスに `Access-Control-Allow-Origin: *` を付ける。** ウィンドウのオリジン
+  (`tauri://localhost`) とは別オリジンなので、これが無いと `draw` の背景画像を描いた
+  canvas が tainted になり `toDataURL` が失敗する。フロントは `img.crossOrigin = "anonymous"`
+  で読む。実機で PNG の保存まで確認済み。
+- **Markdown 側の書き換えは ammonia の `UrlRelative::Custom`** (`markdown::Rewrite`)。
+  `href` / `src` / `<video poster>` に効く。質問の `src` はフロントが `DocumentView.media_base` を
+  前置する (`mediaUrl`。YAML の `src` はファイルパスなのでセグメントごとに
+  `encodeURIComponent` する。`#` や `%` を含む名前をそのまま通すため)。CSP の `img-src` /
+  `media-src` に両方の URL 形を入れてある。
+- **リンクは `open_link` コマンド → `open` crate** で http(s) だけ開く。Markdown は AI が
+  書くので `file:` や独自スキームは通さない。tauri-plugin-opener は同じ `open` を
+  permission 機構付きで包んだものなので、自前コマンド 1 つで足りる。
+- **動画は `loadedmetadata` で `currentTime = 0.001` にする** (`showFirstFrame`)。WebKit は
+  再生かシークをするまで 1 フレームも描かないので、クリックする対象が真っ黒になる。
+
+## 質問の種類とフロント (`ui/app.js`)
+
+renderer は「`collect` を返す」か「`{ collect, finalize }` を返す」。`collect` は同期で、
+回答 / `null` (未回答) / 例外 (不正な入力。メッセージをステータス行に出す) のいずれか。
+`finalize` は全質問の `collect` が通った後にだけ走る (draw の PNG 保存。他の質問が
+弾かれるたびに PNG を書かないため)。
+
+- `media-choice`: 画像はクリックで選択、動画・音声はコントロールがあるのでキャプションで
+  選ぶ (カード全体を `<label>` にすると再生ボタンで選択が切り替わる)。
+- `point`: 動画は native controls を出さず、自前の再生ボタン + シークバー (`videoControls`)。
+  controls を出すとフレームの上の overlay がコントロールを塞ぐか、コントロールのクリックが
+  点になる。マーカーは比率 (`rx` / `ry`) で置くので表示サイズに依らず前回回答を復元できる。
+- `draw`: ストロークを配列で持ち、Undo は配列から外して描き直す。前回回答がある時は
+  その PNG (背景込み) を背景にして上書きし、何も描かなければ前回回答をそのまま返して
+  PNG は書き直さない。背景無しは白で塗る (透過 PNG は黒く見えるビューアが多い)。
+  保存名は `<md の stem>.<id>.png` (`drawing_file_name`。id は YAML 由来なので英数字と `-_`
+  以外は `_` に落とし、落とした場合は元の id のハッシュを付けて `a.b` と `a/b` が
+  衝突しないようにする)。書き込みは `Session::write_file` (一時ファイル + rename。既存の
+  symlink / hard link を辿らず差し替える)。`--no-write` でも PNG は書く (それが回答なので)。
+- `color`: `<input type=color>` は必ず値を持つので、テキスト欄を正とし、空なら未回答。
+- `src` が無い `point` のように入力を作れない質問は `unusable` で表示し、`required` なら
+  submit を止める (そうしないと必須のまま未回答で正常終了できる)。
+- `range`: ytyng-blog のサビ選択ウィジェットに倣い、native controls + 「Use current time」+
+  ±0.1 / ±0.5 のナッジ + 区間再生 (`timeupdate` で `end` に達したら pause)。
+  負数・`end <= start`・長さ超え・長さ未取得は例外で弾く。
+- YAML の `src` と回答の `path` はファイルパスで URL ではない。`#` や `?` を含む名前も
+  そのまま扱う (`mediaKind` は末尾の拡張子だけを見る)。
+
 ## 回答の形 (JSON)
 
-| type | 形 |
-| --- | --- |
-| `choice` | `{ "selected": [value...], "other"?: string }` (単一選択でも配列) |
-| `text` | string |
-| その他 | 未実装。実装時にここと README に書く |
-
-未回答の質問はキーごと出さない。
-
-## 実装状況
-
-できている:
-
-- workspace 構成 (`askdown-core` / `askdown-cli`)、clap の起動オプション
-  (`--list` / `--no-write` / `--timeout` / `--title`)
-- `choice` (単一 / 複数 / other 自由入力)、`text` (1 行 / 複数行) の GUI と書き戻し
-- 前回の回答をウィンドウの初期値にする、`required` のチェック
-
-未実装 (タスク CYBERNEURA-DEV-1057 の範囲):
-
-- **ローカルファイルの表示。** Markdown 内の相対パスの画像・動画、`src` は今は表示できない。
-  Markdown ファイルのディレクトリ以下だけを返すカスタム URI スキーム (または asset protocol +
-  scope) を作り、相対パスをそれに書き換える。ディレクトリ外を読ませないこと。
-- **リンクを外部ブラウザで開く** (tauri-plugin-opener。今はクリックを握りつぶしている)。
-  http(s) だけ許可する。
-- `media-choice`: 画像・動画の選択肢 (単一 / 複数)
-- `point`: 画像・動画上の座標指定 (動画は再生位置も)。座標は元画像のピクセル基準 + 比率
-- `draw`: フリーハンド描画 (背景画像可)。PNG を Markdown の隣に保存し、回答にはそのパス
-- `color`: 色指定
-- `range`: 音声・動画の区間指定 (ytyng-blog のサビ選択のような UI)。開始・終了秒
-- アイコン (今は runandlog のものを仮置き)、CI (`.github/workflows/test.yml` のみ)、
-  リリース (runandlog の release.yml / scripts/release.sh / Homebrew tap を参考に)、
-  サードパーティライセンス表示
+README の表が正。追加・変更したら README と `examples/media.md` も直す。
 
 ## 検証
 
 ```sh
 cargo test
 cargo clippy --all-targets
-cargo run -p askdown -- --list examples/questions.md
-cargo run -p askdown -- examples/questions.md   # ウィンドウが開く
+cargo run -p askdown -- --list examples/media.md
+cargo run -p askdown -- examples/media.md   # ウィンドウが開く
 ```
 
-examples の Markdown を直接答えると書き戻しで変更されるので、/tmp にコピーして試す。
+examples の Markdown を直接答えると書き戻しで変更されるので、/tmp にコピーして試す
+(`draw` は PNG も隣に書く)。
+
+**実機 (macOS) の E2E は orca computer-use で回せる。** `orca computer get-app-state --app askdown`
+で webview の DOM がアクセシビリティツリーに出るので、element-index で click できる。
+落とし穴:
+
+- `set-value` は `<input type=number>` に効かない (`value_not_settable`)。ボタン (Use current
+  time / ナッジ) をクリックして値を入れる。
+- `drag` は pointermove を配送しない (pointerdown / up だけ届くので点が 1 つ打たれる)。
+  ストロークの検証は手で行うか、ブラウザにスタブで読ませる。
+- 要素を追加する操作 (マーカーを置く等) で element-index がずれる。操作のたびに取り直す。
+- 画面の下の方は `click` が自動でスクロールして見せる。座標クリックの前に screenshot を
+  取り直し、その間にスクロールしない。
+
+## 未実装
+
+- アイコン (今は runandlog のものを仮置き。`scripts/generate-icon.py` を runandlog から
+  持ってきて askdown の意匠にする)
+- リリース (runandlog の `release.yml` / `scripts/release.sh` / Homebrew tap を参考に)、
+  サードパーティライセンス表示 (`about.toml` / `generate-third-party-notices.sh`)
+- Linux の実機確認 (CI では Ubuntu で clippy とテストを通しているだけ)。Windows は CI にも
+  入っていない (`media::base_url` の `http://askdown.localhost/` 形は未検証)

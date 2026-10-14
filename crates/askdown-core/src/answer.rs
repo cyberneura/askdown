@@ -45,8 +45,15 @@ pub fn write_back(source: &str, document: &Document, answers: &AnswerSet) -> Str
             Some(range) => edits.push((range.clone(), rendered)),
             None => {
                 // The closing fence may be the last line with no newline after it.
-                let separator = if source[..block.range.end].ends_with('\n') { "\n" } else { "\n\n" };
-                edits.push((block.range.end..block.range.end, format!("{separator}{rendered}")));
+                let separator = if source[..block.range.end].ends_with('\n') {
+                    "\n"
+                } else {
+                    "\n\n"
+                };
+                edits.push((
+                    block.range.end..block.range.end,
+                    format!("{separator}{rendered}"),
+                ));
             }
         }
     }
@@ -65,7 +72,12 @@ mod tests {
     use serde_json::json;
 
     fn answers(pairs: &[(&str, Answer)]) -> AnswerSet {
-        AnswerSet(pairs.iter().map(|(id, value)| (id.to_string(), value.clone())).collect())
+        AnswerSet(
+            pairs
+                .iter()
+                .map(|(id, value)| (id.to_string(), value.clone()))
+                .collect(),
+        )
     }
 
     #[test]
@@ -90,7 +102,7 @@ mod tests {
         let source = "```askdown\ntype: text\n```";
         let output = write_back(source, &parse(source), &answers(&[("q1", json!("x"))]));
         assert!(output.starts_with("```askdown\ntype: text\n```\n\n<!-- askdown:answer -->"));
-        assert_eq!(parse(&output).blocks[0].answer_range.is_some(), true);
+        assert!(parse(&output).blocks[0].answer_range.is_some());
     }
 
     #[test]
