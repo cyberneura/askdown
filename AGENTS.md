@@ -71,10 +71,9 @@ README・コードコメント・UI 文字列・エラーメッセージはす�
 
 ## 質問の種類とフロント (`ui/app.js`)
 
-renderer は「`collect` を返す」か「`{ collect, finalize }` を返す」。`collect` は同期で、
+renderer は「`collect` を返す」か「`{ collect, drawing }` を返す」。`collect` は同期で、
 回答 / `null` (未回答) / 例外 (不正な入力。メッセージをステータス行に出す) のいずれか。
-`finalize` は全質問の `collect` が通った後にだけ走る (draw の PNG 保存。他の質問が
-弾かれるたびに PNG を書かないため)。
+`drawing` は保存する PNG (data URL) を返し、`submit` の `drawings` に載せる。
 
 - `media-choice`: 画像はクリックで選択、動画・音声はコントロールがあるのでキャプションで
   選ぶ (カード全体を `<label>` にすると再生ボタンで選択が切り替わる)。
@@ -88,8 +87,10 @@ renderer は「`collect` を返す」か「`{ collect, finalize }` を返す」�
   まま required なら送信を止め、任意なら未回答にする (背景無しの絵は別の質問への回答になる)。背景無しは白で塗る (透過 PNG は黒く見えるビューアが多い)。
   保存名は `<md の stem>.<id>.png` (`drawing_file_name`。id は YAML 由来なので英数字と `-_`
   以外は `_` に落とし、落とした場合は元の id のハッシュを付けて `a.b` と `a/b` が
-  衝突しないようにする)。書き込みは `Session::write_file` (一時ファイル + rename。既存の
-  symlink / hard link を辿らず差し替える)。`--no-write` でも PNG は書く (それが回答なので)。
+  衝突しないようにする)。PNG は `submit` に同梱して Rust の `commit` が書く: 一時ファイルに
+  書く → Markdown を保存 → rename、の順。Markdown の保存が失敗したら PNG は差し替えない
+  (古い回答が未提出の絵を指すのを防ぐ)。rename は既存の symlink / hard link を辿らず
+  差し替える。`--no-write` でも PNG は書く (それが回答なので)。
 - `color`: `<input type=color>` は必ず値を持つので、テキスト欄を正とし、空なら未回答。
 - `src` が無い `point` のように入力を作れない質問は `unusable` で表示し、`required` なら
   submit を止める (そうしないと必須のまま未回答で正常終了できる)。

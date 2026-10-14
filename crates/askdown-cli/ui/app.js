@@ -11,9 +11,9 @@ let mediaBase = "";
 
 // One entry per question: how to read its answer back out of the form.
 // `collect` returns the answer, null when unanswered, or throws with a message
-// when what is there is not a valid answer. `finalize`, when present, is run
-// after every question has passed `collect` and may replace the answer (the
-// drawing is saved to disk at that point).
+// when what is there is not a valid answer. `drawing`, when present, returns
+// the PNG (as a data URL) to save with the answer, or null when nothing new
+// was drawn; the Rust side writes it and fills in the answer's `path`.
 const collectors = [];
 
 function element(tag, attributes = {}, children = []) {
@@ -460,11 +460,7 @@ function renderDraw(segment, body) {
       // Nothing added: the earlier picture is still the answer, as it is on disk.
       return previous?.path ? previous : null;
     },
-    finalize: async (answer) => {
-      if (!strokes.length) return answer;
-      const path = await invoke("save_drawing", { id, png: canvas.toDataURL("image/png") });
-      return { path, ...answer };
-    },
+    drawing: () => (strokes.length ? canvas.toDataURL("image/png") : null),
   };
 }
 
@@ -606,7 +602,7 @@ function renderQuestion(segment) {
     return card;
   }
   const result = render(segment, body);
-  const { collect, finalize } =
+  const { collect, drawing } =
     typeof result === "function"
       ? { collect: result }
       : result.unusable
@@ -617,7 +613,7 @@ function renderQuestion(segment) {
             },
           }
         : result;
-  collectors.push({ id: segment.id, required: segment.question.required, card, collect, finalize });
+  collectors.push({ id: segment.id, required: segment.question.required, card, collect, drawing });
   return card;
 }
 
@@ -636,10 +632,10 @@ form.addEventListener("submit", async (event) => {
   statusLine.textContent = "";
   try {
     const answers = {};
-    const pending = [];
+    const drawings = {};
     const problems = [];
     for (const collector of collectors) {
-      const { id, required, card, collect, finalize } = collector;
+      const { id, required, card, collect, drawing } = collector;
       let value = null;
       try {
         value = collect();
@@ -654,15 +650,15 @@ form.addEventListener("submit", async (event) => {
         continue;
       }
       answers[id] = value;
-      if (finalize) pending.push(async () => (answers[id] = await finalize(value)));
+      const png = drawing?.();
+      if (png) drawings[id] = png;
     }
     if (problems.length) {
       statusLine.textContent = problems.join(" · ");
       form.querySelector(".missing")?.scrollIntoView({ behavior: "smooth", block: "center" });
       return;
     }
-    for (const run of pending) await run();
-    await invoke("submit", { answers });
+    await invoke("submit", { answers, drawings });
   } catch (error) {
     statusLine.textContent = String(error);
   } finally {

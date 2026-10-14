@@ -1,5 +1,6 @@
 //! The window that asks the questions.
 
+use std::collections::HashMap;
 use std::io;
 use std::path::Path;
 use std::sync::{Arc, Mutex, PoisonError};
@@ -12,6 +13,9 @@ use tauri::{AppHandle, Manager, State};
 
 use crate::media;
 use crate::session::Session;
+
+#[cfg(test)]
+use serde_json::json;
 
 /// How the window was closed.
 #[derive(Debug, Clone, PartialEq)]
@@ -112,18 +116,61 @@ fn document(state: State<'_, GuiState>) -> DocumentView {
     document_view(&state.session.lock().unwrap_or_else(PoisonError::into_inner))
 }
 
+/// `drawings` holds the PNG of each `draw` question (keyed by id, as a data
+/// URL) that was drawn on in this session; its path goes into the answer here.
 #[tauri::command]
-fn submit(app: AppHandle, state: State<'_, GuiState>, answers: AnswerSet) -> Result<(), String> {
-    if state.write_back {
-        state
-            .session
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .save(&answers)
-            .map_err(|error| format!("could not write the answers back: {error}"))?;
+fn submit(
+    app: AppHandle,
+    state: State<'_, GuiState>,
+    mut answers: AnswerSet,
+    drawings: HashMap<String, String>,
+) -> Result<(), String> {
+    {
+        let mut session = state.session.lock().unwrap_or_else(PoisonError::into_inner);
+        commit(&mut session, state.write_back, &mut answers, &drawings)?;
     }
     *state.answers.lock().unwrap_or_else(PoisonError::into_inner) = Some(answers);
     app.exit(0);
+    Ok(())
+}
+
+/// Writes the answers into the Markdown and the drawings next to it, in that
+/// order. A drawing replaces whatever its name held only once the answer that
+/// refers to it is on disk; if the Markdown cannot be saved, no picture
+/// changes. The pictures are written even with `--no-write`: that option keeps
+/// the Markdown untouched, and a picture is a new file that *is* the answer.
+fn commit(
+    session: &mut Session,
+    write_back: bool,
+    answers: &mut AnswerSet,
+    drawings: &HashMap<String, String>,
+) -> Result<(), String> {
+    let mut staged = Vec::new();
+    for (id, png) in drawings {
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(png.strip_prefix("data:image/png;base64,").unwrap_or(png))
+            .map_err(|error| format!("{id}: bad PNG data: {error}"))?;
+        let name = drawing_file_name(session.path(), id);
+        let Some(serde_json::Value::Object(answer)) = answers.0.get_mut(id) else {
+            return Err(format!("{id}: a drawing was sent without its answer"));
+        };
+        answer.insert("path".to_string(), serde_json::Value::String(name.clone()));
+        staged.push(
+            session
+                .stage_file(&name, &bytes)
+                .map_err(|error| format!("could not save {name}: {error}"))?,
+        );
+    }
+    if write_back {
+        session
+            .save(answers)
+            .map_err(|error| format!("could not write the answers back: {error}"))?;
+    }
+    for file in staged {
+        session
+            .commit_file(file)
+            .map_err(|error| format!("could not save a drawing: {error}"))?;
+    }
     Ok(())
 }
 
@@ -150,28 +197,6 @@ fn is_web_link(url: &str) -> bool {
         .split_once("://")
         .map(|(scheme, _)| scheme.to_ascii_lowercase());
     matches!(scheme.as_deref(), Some("http" | "https"))
-}
-
-/// Saves the picture of a `draw` question next to the Markdown file and returns
-/// its path relative to the file, which is what goes into the answer.
-///
-/// Written even with `--no-write`: that option keeps the Markdown untouched,
-/// and the picture is a new file that *is* the answer.
-#[tauri::command]
-fn save_drawing(state: State<'_, GuiState>, id: String, png: String) -> Result<String, String> {
-    save_to(&state, &id, &png)
-}
-
-fn save_to(state: &GuiState, id: &str, png: &str) -> Result<String, String> {
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(png.strip_prefix("data:image/png;base64,").unwrap_or(png))
-        .map_err(|error| format!("bad PNG data: {error}"))?;
-    let session = state.session.lock().unwrap_or_else(PoisonError::into_inner);
-    let name = drawing_file_name(session.path(), id);
-    session
-        .write_file(&name, &bytes)
-        .map_err(|error| format!("could not save {name}: {error}"))?;
-    Ok(name)
 }
 
 /// `<markdown stem>.<question id>.png`, with the id reduced to characters that
@@ -253,11 +278,7 @@ pub fn run(session: Session, options: Options) -> io::Result<Outcome> {
             media::respond(&dir, &request)
         })
         .invoke_handler(tauri::generate_handler![
-            document,
-            submit,
-            cancel,
-            open_link,
-            save_drawing
+            document, submit, cancel, open_link
         ])
         .build(tauri::generate_context!())
         .map_err(io::Error::other)?;
@@ -322,37 +343,88 @@ mod tests {
         );
     }
 
-    #[test]
-    fn a_drawing_replaces_a_symlink_instead_of_writing_through_it() {
-        let dir = std::env::temp_dir().join(format!("askdown-draw-{}", std::process::id()));
+    fn scratch(test: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("askdown-gui-{}-{test}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let markdown = dir.join("q.md");
-        std::fs::write(&markdown, "```askdown\ntype: draw\n```\n").unwrap();
-        let target = dir.join("elsewhere.txt");
-        std::fs::write(&target, "keep").unwrap();
-        #[cfg(unix)]
-        std::os::unix::fs::symlink(&target, dir.join("q.sketch.png")).unwrap();
-        #[cfg(not(unix))]
-        return;
+        std::fs::write(
+            dir.join("q.md"),
+            "```askdown\nid: sketch\ntype: draw\n```\n",
+        )
+        .unwrap();
+        dir
+    }
 
-        let state = GuiState {
-            session: Mutex::new(Session::load(&markdown).unwrap()),
-            write_back: true,
-            answers: Arc::new(Mutex::new(None)),
-        };
-        let result = save_to(&state, "sketch", "iVBORw0KGgo=");
-        assert_eq!(result.as_deref(), Ok("q.sketch.png"));
-        assert_eq!(std::fs::read_to_string(&target).unwrap(), "keep");
-        let saved = dir.join("q.sketch.png");
-        assert!(!saved.symlink_metadata().unwrap().is_symlink());
-        assert_eq!(std::fs::read(&saved).unwrap(), b"\x89PNG\r\n\x1a\n");
-        assert!(!std::fs::read_dir(&dir).unwrap().any(|entry| {
+    fn drawing() -> HashMap<String, String> {
+        HashMap::from([("sketch".to_string(), "iVBORw0KGgo=".to_string())])
+    }
+
+    fn answer() -> AnswerSet {
+        AnswerSet(
+            [("sketch".to_string(), json!({ "width": 1, "height": 1 }))]
+                .into_iter()
+                .collect(),
+        )
+    }
+
+    fn no_temporaries(dir: &Path) -> bool {
+        !std::fs::read_dir(dir).unwrap().any(|entry| {
             entry
                 .unwrap()
                 .file_name()
                 .to_string_lossy()
                 .starts_with('.')
-        }));
+        })
+    }
+
+    #[test]
+    fn a_drawing_lands_next_to_the_markdown_and_in_the_answer() {
+        let dir = scratch("lands");
+        let mut session = Session::load(&dir.join("q.md")).unwrap();
+        let mut answers = answer();
+        commit(&mut session, true, &mut answers, &drawing()).unwrap();
+        assert_eq!(answers.0["sketch"]["path"], "q.sketch.png");
+        assert_eq!(
+            std::fs::read(dir.join("q.sketch.png")).unwrap(),
+            b"\x89PNG\r\n\x1a\n"
+        );
+        assert!(
+            std::fs::read_to_string(dir.join("q.md"))
+                .unwrap()
+                .contains("path: q.sketch.png")
+        );
+        assert!(no_temporaries(&dir));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_drawing_replaces_a_symlink_instead_of_writing_through_it() {
+        let dir = scratch("symlink");
+        let target = dir.join("elsewhere.txt");
+        std::fs::write(&target, "keep").unwrap();
+        std::os::unix::fs::symlink(&target, dir.join("q.sketch.png")).unwrap();
+        let mut session = Session::load(&dir.join("q.md")).unwrap();
+        commit(&mut session, true, &mut answer(), &drawing()).unwrap();
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "keep");
+        let saved = dir.join("q.sketch.png");
+        assert!(!saved.symlink_metadata().unwrap().is_symlink());
+        assert_eq!(std::fs::read(&saved).unwrap(), b"\x89PNG\r\n\x1a\n");
+    }
+
+    #[test]
+    fn a_drawing_is_not_replaced_when_the_markdown_cannot_be_saved() {
+        let dir = scratch("unsaved");
+        std::fs::write(dir.join("q.sketch.png"), "old picture").unwrap();
+        let mut session = Session::load(&dir.join("q.md")).unwrap();
+        // The Markdown goes away while the window is open.
+        std::fs::remove_file(dir.join("q.md")).unwrap();
+        std::fs::create_dir(dir.join("q.md")).unwrap();
+        let result = commit(&mut session, true, &mut answer(), &drawing());
+        assert!(result.is_err(), "{result:?}");
+        assert_eq!(
+            std::fs::read_to_string(dir.join("q.sketch.png")).unwrap(),
+            "old picture"
+        );
+        assert!(no_temporaries(&dir));
     }
 }
