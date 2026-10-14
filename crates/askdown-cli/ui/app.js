@@ -343,6 +343,9 @@ function renderPoint(segment, body) {
 
 function renderDraw(segment, body) {
   const { question, id, previous } = segment;
+  if (!question.src && !previous?.path && (question.width === 0 || question.height === 0)) {
+    return unusable(body, "a draw question needs a width and a height above zero");
+  }
   const canvas = element("canvas", { class: "drawing" });
   const context = canvas.getContext("2d");
   const strokes = [];

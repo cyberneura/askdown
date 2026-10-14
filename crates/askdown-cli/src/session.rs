@@ -29,6 +29,10 @@ pub struct Replaced {
     previous: Option<PathBuf>,
 }
 
+/// Candidate temporary names, short and unrelated to any drawing's name so
+/// that a name near the file system's limit is not pushed over it. A name may
+/// still be taken (a crash left it, and the pid came round again), so callers
+/// take the first that is not.
 fn temporary_name() -> String {
     static NEXT: AtomicU64 = AtomicU64::new(0);
     format!(
@@ -91,14 +95,27 @@ impl Session {
         if in_the_way.is_ok_and(|metadata| metadata.is_dir()) {
             return Err(io::Error::other(format!("{name} is a directory")));
         }
-        // Short and unrelated to `name`, so that a name near the file system's
-        // limit is not pushed over it by a prefix.
-        let temporary = self.base_dir().join(temporary_name());
-        std::fs::write(&temporary, bytes)?;
-        Ok(Staged {
+        // `create_new`: a leftover of the same name is not truncated (nor
+        // followed, if it is a link); the next name is tried instead.
+        let (temporary, mut file) = loop {
+            let candidate = self.base_dir().join(temporary_name());
+            match std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&candidate)
+            {
+                Ok(file) => break (candidate, file),
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+                Err(error) => return Err(error),
+            }
+        };
+        let staged = Staged {
             temporary,
             name: name.to_string(),
-        })
+        };
+        std::io::Write::write_all(&mut file, bytes)?;
+        file.sync_all()?;
+        Ok(staged)
     }
 
     /// Moves a staged file to its name. The rename replaces the directory
@@ -110,7 +127,14 @@ impl Session {
     pub fn commit_file(&self, staged: Staged) -> io::Result<Replaced> {
         let path = self.base_dir().join(&staged.name);
         let previous = if path.symlink_metadata().is_ok() {
-            let aside = self.base_dir().join(temporary_name());
+            // An unused name, so that nothing (such as another set-aside file)
+            // is renamed over.
+            let aside = loop {
+                let candidate = self.base_dir().join(temporary_name());
+                if candidate.symlink_metadata().is_err() {
+                    break candidate;
+                }
+            };
             std::fs::rename(&path, &aside)?;
             Some(aside)
         } else {

@@ -532,6 +532,26 @@ mod tests {
     }
 
     #[test]
+    fn a_leftover_temporary_of_the_same_name_is_not_touched() {
+        let dir = scratch("leftover");
+        // Whatever name the generator would hand out first, it is taken.
+        let pid = std::process::id();
+        for n in 0..64 {
+            std::fs::write(dir.join(format!(".askdown-{pid}-{n}.tmp")), "leftover").unwrap();
+        }
+        let mut session = Session::load(&dir.join("q.md")).unwrap();
+        commit(&mut session, false, &mut answer(), &drawing()).unwrap();
+        assert!(dir.join("q.sketch.png").is_file());
+        for n in 0..64 {
+            assert_eq!(
+                std::fs::read_to_string(dir.join(format!(".askdown-{pid}-{n}.tmp"))).unwrap(),
+                "leftover",
+                "{n}"
+            );
+        }
+    }
+
+    #[test]
     fn a_directory_in_the_way_is_refused_before_the_markdown_is_written() {
         let dir = scratch("directory");
         std::fs::create_dir(dir.join("q.sketch.png")).unwrap();
