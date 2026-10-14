@@ -229,6 +229,9 @@ fn is_web_link(url: &str) -> bool {
 /// The `.` cannot occur in an id that was left alone, so the two forms never
 /// name the same file either. Lower-casing counts as a change: on the usual
 /// macOS and Windows file systems `Sketch` and `sketch` are one file.
+///
+/// A name that would not fit a file system's limit for one name is cut down
+/// to a prefix of each part plus a hash of the whole.
 fn drawing_file_name(markdown: &Path, id: &str) -> String {
     let stem = markdown
         .file_stem()
@@ -244,16 +247,37 @@ fn drawing_file_name(markdown: &Path, id: &str) -> String {
             }
         })
         .collect();
-    if safe == id && !safe.is_empty() {
+    // FNV-1a, all 64 bits: dependency-free, and wide enough that two ids
+    // with the same sanitised form do not share a file in practice.
+    let fnv = |text: &str| {
+        text.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+            (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
+        })
+    };
+    let name = if safe == id && !safe.is_empty() {
         format!("{stem}.{safe}.png")
     } else {
-        // FNV-1a, all 64 bits: dependency-free, and wide enough that two ids
-        // with the same sanitised form do not share a file in practice.
-        let hash = id.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
-            (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
-        });
-        format!("{stem}.{safe}.{hash:016x}.png")
+        format!("{stem}.{safe}.{:016x}.png", fnv(id))
+    };
+    // 255 bytes is the usual limit; well under it, since the rest of the
+    // path and the temporary names are not counted here.
+    const LONGEST: usize = 200;
+    if name.len() <= LONGEST {
+        return name;
     }
+    fn head(text: &str, bytes: usize) -> &str {
+        let mut end = bytes.min(text.len());
+        while !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        &text[..end]
+    }
+    format!(
+        "{}.{}.{:016x}.png",
+        head(&stem, 64),
+        head(&safe, 64),
+        fnv(&format!("{stem}\0{id}"))
+    )
 }
 
 /// Opens the window and blocks until it is answered, cancelled or timed out.
@@ -360,6 +384,20 @@ mod tests {
         assert_ne!(
             upper.to_lowercase(),
             drawing_file_name(Path::new("/tmp/questions.md"), "SKETCH").to_lowercase()
+        );
+        // A long Markdown name is cut down, deterministically and still apart.
+        let long = format!("/tmp/{}.md", "m".repeat(250));
+        let cut = drawing_file_name(Path::new(&long), "sketch");
+        assert!(cut.len() <= 200, "{}", cut.len());
+        assert!(cut.starts_with(&"m".repeat(64)), "{cut}");
+        assert_eq!(cut, drawing_file_name(Path::new(&long), "sketch"));
+        assert_ne!(cut, drawing_file_name(Path::new(&long), "other"));
+        assert_ne!(
+            cut,
+            drawing_file_name(
+                Path::new(&format!("/tmp/{}x.md", "m".repeat(250))),
+                "sketch"
+            )
         );
         // Same sanitised form, different ids: still different files.
         assert_ne!(
@@ -481,10 +519,15 @@ mod tests {
         let drawings = BTreeMap::from([(id.clone(), "iVBORw0KGgo=".to_string())]);
         let mut session = Session::load(&dir.join("q.md")).unwrap();
         commit(&mut session, false, &mut answers, &drawings).unwrap();
-        assert!(dir.join(format!("q.{id}.png")).is_file());
+        let path = answers.0[&id]["path"].as_str().unwrap();
+        assert!(path.len() <= 200, "{path}");
+        assert!(dir.join(path).is_file());
         assert!(no_temporaries(&dir));
     }
 
+    /// Needs a way to make one rename fail after another succeeded: on macOS
+    /// a file with the immutable flag cannot be renamed (or renamed over).
+    #[cfg(target_os = "macos")]
     #[test]
     fn a_later_failure_puts_back_the_pictures_replaced_before_it() {
         let dir = scratch("rollback");
@@ -494,25 +537,42 @@ mod tests {
         )
         .unwrap();
         std::fs::write(dir.join("q.first.png"), "old picture").unwrap();
+        std::fs::write(dir.join("q.second.png"), "locked").unwrap();
+        let chflags = |flag: &str| {
+            assert!(
+                std::process::Command::new("chflags")
+                    .arg(flag)
+                    .arg(dir.join("q.second.png"))
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+        };
+        chflags("uchg");
         let mut session = Session::load(&dir.join("q.md")).unwrap();
-        // Longer than any file system allows for one name, so its rename fails
-        // after `first` has already been replaced (ids sort first/second).
-        let long = "z".repeat(1000);
         let mut answers = AnswerSet(
-            [("first".to_string(), json!({})), (long.clone(), json!({}))]
-                .into_iter()
-                .collect(),
+            [
+                ("first".to_string(), json!({})),
+                ("second".to_string(), json!({})),
+            ]
+            .into_iter()
+            .collect(),
         );
         let drawings = BTreeMap::from([
             ("first".to_string(), "iVBORw0KGgo=".to_string()),
-            (long.clone(), "iVBORw0KGgo=".to_string()),
+            ("second".to_string(), "iVBORw0KGgo=".to_string()),
         ]);
         let before = std::fs::read_to_string(dir.join("q.md")).unwrap();
         let result = commit(&mut session, true, &mut answers, &drawings);
+        chflags("nouchg");
         assert!(result.is_err(), "{result:?}");
         assert_eq!(
             std::fs::read_to_string(dir.join("q.first.png")).unwrap(),
             "old picture"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("q.second.png")).unwrap(),
+            "locked"
         );
         assert_eq!(std::fs::read_to_string(dir.join("q.md")).unwrap(), before);
         assert!(no_temporaries(&dir));
