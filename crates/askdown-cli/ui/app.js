@@ -311,7 +311,14 @@ function renderPoint(segment, body) {
   return () => {
     if (!points.length) return null;
     const [width, height] = natural();
-    return { width, height, points };
+    if (!width || !height) throw new Error(`${id}: the picture has not loaded, so the points cannot be placed`);
+    // rx / ry are what was marked; x / y follow the picture as it is now (a
+    // restored answer may come from a picture that has since been regenerated).
+    return {
+      width,
+      height,
+      points: points.map((point) => ({ ...point, x: Math.round(point.rx * width), y: Math.round(point.ry * height) })),
+    };
   };
 }
 
