@@ -249,9 +249,10 @@ function renderPoint(segment, body) {
   // A restored answer may have been edited by hand; whatever is not a list of
   // points is treated as no points (what is there is checked at submit).
   const restored = previous?.points ?? question.default?.points ?? [];
+  // Only the fields of this kind: a question that was a video may be a picture now.
   let points = (Array.isArray(restored) ? restored : [])
     .filter((point) => point != null && typeof point === "object")
-    .map((point) => ({ ...point }));
+    .map(({ x, y, rx, ry, time }) => (kind === "video" ? { x, y, rx, ry, time } : { x, y, rx, ry }));
   // A question that was multiple when it was answered may be single now.
   if (!question.multiple) points = points.slice(0, 1);
   const natural = () =>

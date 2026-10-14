@@ -519,6 +519,19 @@ mod tests {
     }
 
     #[test]
+    fn a_rollback_leaves_an_edit_made_after_the_save_alone() {
+        let dir = scratch("edited");
+        let mut session = Session::load(&dir.join("q.md")).unwrap();
+        let before = session.save(&answer()).unwrap();
+        std::fs::write(dir.join("q.md"), "someone else's text\n").unwrap();
+        assert!(session.restore(&before).is_err());
+        assert_eq!(
+            std::fs::read_to_string(dir.join("q.md")).unwrap(),
+            "someone else's text\n"
+        );
+    }
+
+    #[test]
     fn a_directory_in_the_way_is_refused_before_the_markdown_is_written() {
         let dir = scratch("directory");
         std::fs::create_dir(dir.join("q.sketch.png")).unwrap();

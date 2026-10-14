@@ -143,8 +143,12 @@ impl Session {
     }
 
     /// Puts the file back to `source`, as read before a save that then had to
-    /// be undone.
+    /// be undone -- unless the file has changed since that save, in which case
+    /// someone else's edit is in it and is left alone.
     pub fn restore(&mut self, source: &str) -> io::Result<()> {
+        if std::fs::read_to_string(&self.path)? != self.source {
+            return Err(io::Error::other("the file was edited after the save"));
+        }
         std::fs::write(&self.path, source)?;
         self.document = parse(source);
         self.source = source.to_string();
