@@ -314,11 +314,16 @@ function renderPoint(segment, body) {
     if (!points.length) return null;
     const [width, height] = natural();
     if (!width || !height) throw new Error(`${id}: the picture has not loaded, so the points cannot be placed`);
+    // A restored or default point is not trusted: it may have been edited by
+    // hand, or come from a clip that has since been replaced by a shorter one.
+    const inside = (value) => Number.isFinite(value) && value >= 0 && value <= 1;
+    if (!points.every((point) => inside(point.rx) && inside(point.ry))) {
+      throw new Error(`${id}: a point is outside the picture; mark it again`);
+    }
     if (kind === "video") {
-      // A restored time may come from a clip that has since been replaced by a shorter one.
       if (!Number.isFinite(media.duration)) throw new Error(`${id}: the video has not loaded, so the points cannot be checked`);
-      const stale = points.find((point) => point.time == null || point.time > media.duration + 0.05);
-      if (stale) throw new Error(`${id}: a point is at ${formatTime(stale.time)}, past the end of the video; mark it again`);
+      const bad = points.find((point) => !Number.isFinite(point.time) || point.time < 0 || point.time > media.duration + 0.05);
+      if (bad) throw new Error(`${id}: a point is at ${formatTime(bad.time)}, outside the video; mark it again`);
     }
     // rx / ry are what was marked; x / y follow the picture as it is now (a
     // restored answer may come from a picture that has since been regenerated).
