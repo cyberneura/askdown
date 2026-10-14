@@ -220,13 +220,15 @@ fn is_web_link(url: &str) -> bool {
     matches!(scheme.as_deref(), Some("http" | "https"))
 }
 
-/// `<markdown stem>.<question id>.png`, with the id reduced to characters that
-/// are safe in a file name (it comes from the YAML, so it could hold anything).
+/// `<markdown stem>.<question id>.png`, with the id reduced to lower-case
+/// characters that are safe in a file name (it comes from the YAML, so it
+/// could hold anything).
 ///
 /// An id that had to be changed gets a hash of the original appended after a
 /// `.`, so that `a.b` and `a/b` do not end up overwriting each other's picture.
 /// The `.` cannot occur in an id that was left alone, so the two forms never
-/// name the same file either.
+/// name the same file either. Lower-casing counts as a change: on the usual
+/// macOS and Windows file systems `Sketch` and `sketch` are one file.
 fn drawing_file_name(markdown: &Path, id: &str) -> String {
     let stem = markdown
         .file_stem()
@@ -236,7 +238,7 @@ fn drawing_file_name(markdown: &Path, id: &str) -> String {
         .chars()
         .map(|c| {
             if c.is_ascii_alphanumeric() || "-_".contains(c) {
-                c
+                c.to_ascii_lowercase()
             } else {
                 '_'
             }
@@ -348,6 +350,16 @@ mod tests {
         assert_eq!(
             dotted,
             drawing_file_name(Path::new("/tmp/questions.md"), "a.b")
+        );
+        // Ids that differ only in case are one file on a case-folding file system.
+        let upper = drawing_file_name(Path::new("/tmp/questions.md"), "Sketch");
+        let lower = drawing_file_name(Path::new("/tmp/questions.md"), "sketch");
+        assert_eq!(lower, "questions.sketch.png");
+        assert!(upper.starts_with("questions.sketch."), "{upper}");
+        assert_ne!(upper.to_lowercase(), lower);
+        assert_ne!(
+            upper.to_lowercase(),
+            drawing_file_name(Path::new("/tmp/questions.md"), "SKETCH").to_lowercase()
         );
         // Same sanitised form, different ids: still different files.
         assert_ne!(
