@@ -42,9 +42,9 @@ function trustedHtml(html) {
 
 // Media paths in the YAML are relative to the Markdown file, like those in the
 // prose; the Rust side rewrites the prose, this does the same for questions.
-// A path here is a file name, not a URL: `#` and `%` in it are literal.
+// A path here is a file name, never a URL: `#`, `%` and `:` in it are literal
+// (`frame:1.png` is a file, not a scheme).
 function mediaUrl(src) {
-  if (/^[a-z][a-z0-9+.-]*:/i.test(src) || src.startsWith("/")) return src;
   return mediaBase + src.replace(/^\.\//, "").split("/").map(encodeURIComponent).join("/");
 }
 
@@ -314,6 +314,12 @@ function renderPoint(segment, body) {
     if (!points.length) return null;
     const [width, height] = natural();
     if (!width || !height) throw new Error(`${id}: the picture has not loaded, so the points cannot be placed`);
+    if (kind === "video") {
+      // A restored time may come from a clip that has since been replaced by a shorter one.
+      if (!Number.isFinite(media.duration)) throw new Error(`${id}: the video has not loaded, so the points cannot be checked`);
+      const stale = points.find((point) => point.time == null || point.time > media.duration + 0.05);
+      if (stale) throw new Error(`${id}: a point is at ${formatTime(stale.time)}, past the end of the video; mark it again`);
+    }
     // rx / ry are what was marked; x / y follow the picture as it is now (a
     // restored answer may come from a picture that has since been regenerated).
     return {

@@ -96,8 +96,11 @@ renderer は「`collect` を返す」か「`{ collect, finalize }` を返す」�
 - `range`: ytyng-blog のサビ選択ウィジェットに倣い、native controls + 「Use current time」+
   ±0.1 / ±0.5 のナッジ + 区間再生 (`timeupdate` で `end` に達したら pause)。
   負数・`end <= start`・長さ超え・長さ未取得は例外で弾く。
-- YAML の `src` と回答の `path` はファイルパスで URL ではない。`#` や `?` を含む名前も
-  そのまま扱う (`mediaKind` は末尾の拡張子だけを見る)。
+- YAML の `src` と回答の `path` はファイルパスで URL ではない。`#` / `?` / `:` を含む名前も
+  そのまま扱う (`mediaUrl` はスキーム判定をせず常にパスとしてエンコードし、`mediaKind` は
+  末尾の拡張子だけを見る)。
+- `point` の復元した `time` は送信時に動画の長さと照合する (差し替えで短くなった動画の
+  外を指す点を出さない)。
 
 ## 回答の形 (JSON)
 
