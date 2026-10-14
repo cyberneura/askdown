@@ -335,6 +335,9 @@ function renderDraw(segment, body) {
   // stroke made then would land in the wrong place once it is resized, and an
   // export would lack the background. Nothing is accepted until it has loaded.
   let loading = false;
+  // A background that failed to load is not replaced by a blank sheet: a
+  // drawing without it would answer a different question.
+  let failed = null;
 
   const paint = (stroke, from = 0) => {
     context.strokeStyle = stroke.color;
@@ -387,9 +390,8 @@ function renderDraw(segment, body) {
     };
     image.addEventListener("load", ready);
     image.addEventListener("error", () => {
-      statusLine.textContent = `Could not load ${background}`;
-      image = null;
-      ready();
+      failed = `${id}: could not load ${background}`;
+      statusLine.textContent = failed;
     });
     image.src = mediaUrl(background);
   }
@@ -438,6 +440,10 @@ function renderDraw(segment, body) {
 
   return {
     collect: () => {
+      if (failed) {
+        if (question.required) throw new Error(failed);
+        return null;
+      }
       if (loading) throw new Error(`${id}: the background is still loading`);
       if (strokes.length) return { width: canvas.width, height: canvas.height };
       // Nothing added: the earlier picture is still the answer, as it is on disk.
