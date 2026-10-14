@@ -247,6 +247,8 @@ function renderPoint(segment, body) {
   if (kind === "video") body.append(videoControls(media));
 
   let points = (previous?.points ?? question.default?.points ?? []).map((point) => ({ ...point }));
+  // A question that was multiple when it was answered may be single now.
+  if (!question.multiple) points = points.slice(0, 1);
   const natural = () =>
     kind === "video" ? [media.videoWidth, media.videoHeight] : [media.naturalWidth, media.naturalHeight];
 

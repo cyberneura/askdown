@@ -138,10 +138,18 @@ fn cancel(app: AppHandle) {
 /// schemes could start arbitrary programs.
 #[tauri::command]
 fn open_link(url: String) -> Result<(), String> {
-    if !(url.starts_with("https://") || url.starts_with("http://")) {
+    if !is_web_link(&url) {
         return Err(format!("only http(s) links are opened: {url}"));
     }
     open::that_detached(&url).map_err(|error| format!("could not open {url}: {error}"))
+}
+
+/// Schemes are case-insensitive, and the window lets `HTTPS://...` through.
+fn is_web_link(url: &str) -> bool {
+    let scheme = url
+        .split_once("://")
+        .map(|(scheme, _)| scheme.to_ascii_lowercase());
+    matches!(scheme.as_deref(), Some("http" | "https"))
 }
 
 /// Saves the picture of a `draw` question next to the Markdown file and returns
@@ -271,6 +279,17 @@ pub fn run(session: Session, options: Options) -> io::Result<Outcome> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_web_links_are_opened_whatever_their_case() {
+        assert!(is_web_link("https://example.com/x"));
+        assert!(is_web_link("HTTPS://example.com"));
+        assert!(is_web_link("Http://example.com"));
+        assert!(!is_web_link("file:///etc/passwd"));
+        assert!(!is_web_link("javascript:alert(1)"));
+        assert!(!is_web_link("httpx://example.com"));
+        assert!(!is_web_link("example.com"));
+    }
 
     #[test]
     fn drawing_file_names_come_from_the_markdown_and_the_question() {
