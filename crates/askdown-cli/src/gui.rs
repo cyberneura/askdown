@@ -178,14 +178,27 @@ fn commit(
         match session.commit_file(file) {
             Ok(done) => replaced.push(done),
             Err(error) => {
-                // Best effort, in reverse: the pictures first, then the Markdown.
-                for done in replaced.into_iter().rev() {
-                    let _ = session.undo(done);
+                // The Markdown first: if it cannot be put back (someone edited
+                // it since the save), the answers in it stand, and so must the
+                // pictures they refer to. Otherwise everything goes back.
+                let markdown_restored = match &before {
+                    Some(before) => session.restore(before).is_ok(),
+                    None => true,
+                };
+                if markdown_restored {
+                    for done in replaced.into_iter().rev() {
+                        let _ = session.undo(done);
+                    }
+                    return Err(format!("could not save a drawing: {error}"));
                 }
-                if let Some(before) = &before {
-                    let _ = session.restore(before);
+                for done in replaced {
+                    session.finish(done);
                 }
-                return Err(format!("could not save a drawing: {error}"));
+                return Err(format!(
+                    "could not save a drawing: {error}. The answers were written and the file \
+                     was then edited, so they were left as written; the picture of this answer \
+                     is not the new one"
+                ));
             }
         }
     }

@@ -93,6 +93,8 @@ renderer は「`collect` を返す」か「`{ collect, drawing }` を返す」�
   (rename で置き換えられない唯一の現実的なケース)、それでも rename が失敗したら Markdown を
   保存前の内容に戻す。rename の前に既存ファイルを一時名に退避し (`Replaced`)、後の描画で
   失敗したら先に差し替えた分も戻す (`Session::undo`)。全部成功したら退避分を消す (`finish`)。
+  保存後に外部編集があって Markdown を戻せない時は、書いた回答が残るので描画も戻さず、
+  エラーにその旨を書く (回答と絵の対応を崩さない)。
   rename は既存の symlink / hard link を辿らず差し替える。`--no-write` でも PNG は書く (それが回答なので)。
 - `color`: `<input type=color>` は必ず値を持つので、テキスト欄を正とし、空なら未回答。
 - `src` が無い `point` のように入力を作れない質問は `unusable` で表示し、`required` なら
