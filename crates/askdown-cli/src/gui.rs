@@ -1,6 +1,6 @@
 //! The window that asks the questions.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::io;
 use std::path::Path;
 use std::sync::{Arc, Mutex, PoisonError};
@@ -118,12 +118,13 @@ fn document(state: State<'_, GuiState>) -> DocumentView {
 
 /// `drawings` holds the PNG of each `draw` question (keyed by id, as a data
 /// URL) that was drawn on in this session; its path goes into the answer here.
+/// Ordered by id so that a failure part-way is reproducible.
 #[tauri::command]
 fn submit(
     app: AppHandle,
     state: State<'_, GuiState>,
     mut answers: AnswerSet,
-    drawings: HashMap<String, String>,
+    drawings: BTreeMap<String, String>,
 ) -> Result<(), String> {
     {
         let mut session = state.session.lock().unwrap_or_else(PoisonError::into_inner);
@@ -137,14 +138,15 @@ fn submit(
 /// Writes the answers into the Markdown and the drawings next to it, in that
 /// order. A drawing replaces whatever its name held only once the answer that
 /// refers to it is on disk; if the Markdown cannot be saved, no picture
-/// changes, and if a picture then cannot be put in place, the Markdown is put
-/// back as it was. The pictures are written even with `--no-write`: that option
-/// keeps the Markdown untouched, and a picture is a new file that *is* the answer.
+/// changes, and if a picture then cannot be put in place, the Markdown and the
+/// pictures already replaced are put back as they were. The pictures are
+/// written even with `--no-write`: that option keeps the Markdown untouched,
+/// and a picture is a new file that *is* the answer.
 fn commit(
     session: &mut Session,
     write_back: bool,
     answers: &mut AnswerSet,
-    drawings: &HashMap<String, String>,
+    drawings: &BTreeMap<String, String>,
 ) -> Result<(), String> {
     let mut staged = Vec::new();
     for (id, png) in drawings {
@@ -173,16 +175,24 @@ fn commit(
     } else {
         None
     };
+    let mut replaced = Vec::new();
     for file in staged {
-        if let Err(error) = session.commit_file(file) {
-            // Best effort: a picture already moved in an earlier turn of this
-            // loop stays. Staging refuses the one failure a rename is prone to
-            // (a directory in the way), so this is not expected to run.
-            if let Some(before) = &before {
-                let _ = session.restore(before);
+        match session.commit_file(file) {
+            Ok(done) => replaced.push(done),
+            Err(error) => {
+                // Best effort, in reverse: the pictures first, then the Markdown.
+                for done in replaced.into_iter().rev() {
+                    let _ = session.undo(done);
+                }
+                if let Some(before) = &before {
+                    let _ = session.restore(before);
+                }
+                return Err(format!("could not save a drawing: {error}"));
             }
-            return Err(format!("could not save a drawing: {error}"));
         }
+    }
+    for done in replaced {
+        session.finish(done);
     }
     Ok(())
 }
@@ -368,8 +378,8 @@ mod tests {
         dir
     }
 
-    fn drawing() -> HashMap<String, String> {
-        HashMap::from([("sketch".to_string(), "iVBORw0KGgo=".to_string())])
+    fn drawing() -> BTreeMap<String, String> {
+        BTreeMap::from([("sketch".to_string(), "iVBORw0KGgo=".to_string())])
     }
 
     fn answer() -> AnswerSet {
@@ -458,10 +468,43 @@ mod tests {
         let dir = scratch("long");
         let id = "a".repeat(240);
         let mut answers = AnswerSet([(id.clone(), json!({}))].into_iter().collect());
-        let drawings = HashMap::from([(id.clone(), "iVBORw0KGgo=".to_string())]);
+        let drawings = BTreeMap::from([(id.clone(), "iVBORw0KGgo=".to_string())]);
         let mut session = Session::load(&dir.join("q.md")).unwrap();
         commit(&mut session, false, &mut answers, &drawings).unwrap();
         assert!(dir.join(format!("q.{id}.png")).is_file());
+        assert!(no_temporaries(&dir));
+    }
+
+    #[test]
+    fn a_later_failure_puts_back_the_pictures_replaced_before_it() {
+        let dir = scratch("rollback");
+        std::fs::write(
+            dir.join("q.md"),
+            "```askdown\nid: first\ntype: draw\n```\n\n```askdown\nid: second\ntype: draw\n```\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("q.first.png"), "old picture").unwrap();
+        let mut session = Session::load(&dir.join("q.md")).unwrap();
+        // Longer than any file system allows for one name, so its rename fails
+        // after `first` has already been replaced (ids sort first/second).
+        let long = "z".repeat(1000);
+        let mut answers = AnswerSet(
+            [("first".to_string(), json!({})), (long.clone(), json!({}))]
+                .into_iter()
+                .collect(),
+        );
+        let drawings = BTreeMap::from([
+            ("first".to_string(), "iVBORw0KGgo=".to_string()),
+            (long.clone(), "iVBORw0KGgo=".to_string()),
+        ]);
+        let before = std::fs::read_to_string(dir.join("q.md")).unwrap();
+        let result = commit(&mut session, true, &mut answers, &drawings);
+        assert!(result.is_err(), "{result:?}");
+        assert_eq!(
+            std::fs::read_to_string(dir.join("q.first.png")).unwrap(),
+            "old picture"
+        );
+        assert_eq!(std::fs::read_to_string(dir.join("q.md")).unwrap(), before);
         assert!(no_temporaries(&dir));
     }
 

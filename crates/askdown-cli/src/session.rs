@@ -20,6 +20,24 @@ impl Drop for Staged {
     }
 }
 
+/// A staged file moved to its name, with whatever that name held before set
+/// aside, so that the move can still be undone ([`Session::undo`]) until it
+/// is made final ([`Session::finish`]).
+#[derive(Debug)]
+pub struct Replaced {
+    path: PathBuf,
+    previous: Option<PathBuf>,
+}
+
+fn temporary_name() -> String {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    format!(
+        ".askdown-{}-{}.tmp",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    )
+}
+
 pub struct Session {
     path: PathBuf,
     document: Document,
@@ -75,12 +93,7 @@ impl Session {
         }
         // Short and unrelated to `name`, so that a name near the file system's
         // limit is not pushed over it by a prefix.
-        static NEXT: AtomicU64 = AtomicU64::new(0);
-        let temporary = self.base_dir().join(format!(
-            ".askdown-{}-{}.tmp",
-            std::process::id(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
-        ));
+        let temporary = self.base_dir().join(temporary_name());
         std::fs::write(&temporary, bytes)?;
         Ok(Staged {
             temporary,
@@ -91,11 +104,42 @@ impl Session {
     /// Moves a staged file to its name. The rename replaces the directory
     /// entry, so an existing symlink or hard link of that name is swapped out
     /// rather than followed, and a crash leaves no half-written file.
-    pub fn commit_file(&self, staged: Staged) -> io::Result<()> {
-        let result = std::fs::rename(&staged.temporary, self.base_dir().join(&staged.name));
-        // Either way the temporary is gone: moved, or removed by the drop.
+    ///
+    /// What the name held before is set aside under a temporary name first,
+    /// so that the move can be undone if a later step fails.
+    pub fn commit_file(&self, staged: Staged) -> io::Result<Replaced> {
+        let path = self.base_dir().join(&staged.name);
+        let previous = if path.symlink_metadata().is_ok() {
+            let aside = self.base_dir().join(temporary_name());
+            std::fs::rename(&path, &aside)?;
+            Some(aside)
+        } else {
+            None
+        };
+        if let Err(error) = std::fs::rename(&staged.temporary, &path) {
+            if let Some(aside) = &previous {
+                let _ = std::fs::rename(aside, &path);
+            }
+            return Err(error);
+        }
+        // The temporary is gone (moved), so there is nothing for the drop to remove.
         drop(staged);
-        result
+        Ok(Replaced { path, previous })
+    }
+
+    /// Puts back what a name held before [`Session::commit_file`].
+    pub fn undo(&self, replaced: Replaced) -> io::Result<()> {
+        match replaced.previous {
+            Some(aside) => std::fs::rename(aside, &replaced.path),
+            None => std::fs::remove_file(&replaced.path),
+        }
+    }
+
+    /// Lets go of what a name held before [`Session::commit_file`].
+    pub fn finish(&self, replaced: Replaced) {
+        if let Some(aside) = replaced.previous {
+            let _ = std::fs::remove_file(aside);
+        }
     }
 
     /// Puts the file back to `source`, as read before a save that then had to

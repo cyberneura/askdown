@@ -91,7 +91,9 @@ renderer は「`collect` を返す」か「`{ collect, drawing }` を返す」�
   書く → Markdown を保存 → rename、の順。Markdown の保存が失敗したら PNG は差し替えない
   (古い回答が未提出の絵を指すのを防ぐ)。保存先がディレクトリなら stage の時点で弾き
   (rename で置き換えられない唯一の現実的なケース)、それでも rename が失敗したら Markdown を
-  保存前の内容に戻す。rename は既存の symlink / hard link を辿らず差し替える。`--no-write` でも PNG は書く (それが回答なので)。
+  保存前の内容に戻す。rename の前に既存ファイルを一時名に退避し (`Replaced`)、後の描画で
+  失敗したら先に差し替えた分も戻す (`Session::undo`)。全部成功したら退避分を消す (`finish`)。
+  rename は既存の symlink / hard link を辿らず差し替える。`--no-write` でも PNG は書く (それが回答なので)。
 - `color`: `<input type=color>` は必ず値を持つので、テキスト欄を正とし、空なら未回答。
 - `src` が無い `point` のように入力を作れない質問は `unusable` で表示し、`required` なら
   submit を止める (そうしないと必須のまま未回答で正常終了できる)。

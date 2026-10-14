@@ -68,6 +68,10 @@ Relative paths in the Markdown and in `src` are resolved against the Markdown
 file. Only files in that file's directory (and below) are served; anything else
 is refused. Links to `http(s)` URLs open in the default browser.
 
+In the Markdown, a destination is a URL, as CommonMark has it: write `%20` for
+a space and `%23` for a `#` in a file name. In the YAML (`src`), it is a plain
+file path, written as it is.
+
 ````markdown
 ![Current layout](shots/layout.png)
 
