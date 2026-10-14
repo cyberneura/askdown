@@ -246,7 +246,12 @@ function renderPoint(segment, body) {
   body.append(stage);
   if (kind === "video") body.append(videoControls(media));
 
-  let points = (previous?.points ?? question.default?.points ?? []).map((point) => ({ ...point }));
+  // A restored answer may have been edited by hand; whatever is not a list of
+  // points is treated as no points (what is there is checked at submit).
+  const restored = previous?.points ?? question.default?.points ?? [];
+  let points = (Array.isArray(restored) ? restored : [])
+    .filter((point) => point != null && typeof point === "object")
+    .map((point) => ({ ...point }));
   // A question that was multiple when it was answered may be single now.
   if (!question.multiple) points = points.slice(0, 1);
   const natural = () =>
@@ -601,7 +606,13 @@ function renderQuestion(segment) {
     body.append(element("p", { class: "unsupported", text: `"${segment.question.type}" questions are not supported yet.` }));
     return card;
   }
-  const result = render(segment, body);
+  let result;
+  try {
+    result = render(segment, body);
+  } catch (error) {
+    // One question that cannot be built must not take the whole page down.
+    result = unusable(body, `could not show this question: ${error.message ?? error}`);
+  }
   const { collect, drawing } =
     typeof result === "function"
       ? { collect: result }

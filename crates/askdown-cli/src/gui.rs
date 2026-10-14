@@ -165,13 +165,11 @@ fn commit(
         );
     }
     let before = if write_back {
-        let before = session
-            .read_current()
-            .map_err(|error| format!("could not read {}: {error}", session.path().display()))?;
-        session
-            .save(answers)
-            .map_err(|error| format!("could not write the answers back: {error}"))?;
-        Some(before)
+        Some(
+            session
+                .save(answers)
+                .map_err(|error| format!("could not write the answers back: {error}"))?,
+        )
     } else {
         None
     };

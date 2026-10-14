@@ -151,24 +151,21 @@ impl Session {
         Ok(())
     }
 
-    /// The file as it is on disk right now.
-    pub fn read_current(&self) -> io::Result<String> {
-        std::fs::read_to_string(&self.path)
-    }
-
-    /// Writes the answers into the file.
+    /// Writes the answers into the file and returns what the file held just
+    /// before, for [`Session::restore`].
     ///
     /// The file is read again first: the agent or the user may have edited it
     /// while the window was open, and writing back over the copy loaded at start
     /// would silently undo that. Answers are matched to questions by id, so they
-    /// land in the right place even if blocks moved.
-    pub fn save(&mut self, answers: &AnswerSet) -> io::Result<()> {
+    /// land in the right place even if blocks moved. The content returned is
+    /// that same read, so a restore keeps those edits too.
+    pub fn save(&mut self, answers: &AnswerSet) -> io::Result<String> {
         let current = std::fs::read_to_string(&self.path)?;
         let document = parse(&current);
         let output = write_back(&current, &document, answers);
         std::fs::write(&self.path, &output)?;
         self.document = parse(&output);
         self.source = output;
-        Ok(())
+        Ok(current)
     }
 }
