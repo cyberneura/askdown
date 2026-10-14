@@ -65,6 +65,11 @@ impl Session {
         if name.is_empty() || name.contains(['/', '\\']) {
             return Err(io::Error::other(format!("{name:?} is not a file name")));
         }
+        // The one thing a rename cannot replace. Found out now, before the
+        // answer that refers to the file is written.
+        if self.base_dir().join(name).is_dir() {
+            return Err(io::Error::other(format!("{name} is a directory")));
+        }
         let temporary = self
             .base_dir()
             .join(format!(".{name}.askdown-{}", std::process::id()));
@@ -83,6 +88,20 @@ impl Session {
         // Either way the temporary is gone: moved, or removed by the drop.
         drop(staged);
         result
+    }
+
+    /// Puts the file back to `source`, as read before a save that then had to
+    /// be undone.
+    pub fn restore(&mut self, source: &str) -> io::Result<()> {
+        std::fs::write(&self.path, source)?;
+        self.document = parse(source);
+        self.source = source.to_string();
+        Ok(())
+    }
+
+    /// The file as it is on disk right now.
+    pub fn read_current(&self) -> io::Result<String> {
+        std::fs::read_to_string(&self.path)
     }
 
     /// Writes the answers into the file.

@@ -137,8 +137,9 @@ fn submit(
 /// Writes the answers into the Markdown and the drawings next to it, in that
 /// order. A drawing replaces whatever its name held only once the answer that
 /// refers to it is on disk; if the Markdown cannot be saved, no picture
-/// changes. The pictures are written even with `--no-write`: that option keeps
-/// the Markdown untouched, and a picture is a new file that *is* the answer.
+/// changes, and if a picture then cannot be put in place, the Markdown is put
+/// back as it was. The pictures are written even with `--no-write`: that option
+/// keeps the Markdown untouched, and a picture is a new file that *is* the answer.
 fn commit(
     session: &mut Session,
     write_back: bool,
@@ -161,15 +162,27 @@ fn commit(
                 .map_err(|error| format!("could not save {name}: {error}"))?,
         );
     }
-    if write_back {
+    let before = if write_back {
+        let before = session
+            .read_current()
+            .map_err(|error| format!("could not read {}: {error}", session.path().display()))?;
         session
             .save(answers)
             .map_err(|error| format!("could not write the answers back: {error}"))?;
-    }
+        Some(before)
+    } else {
+        None
+    };
     for file in staged {
-        session
-            .commit_file(file)
-            .map_err(|error| format!("could not save a drawing: {error}"))?;
+        if let Err(error) = session.commit_file(file) {
+            // Best effort: a picture already moved in an earlier turn of this
+            // loop stays. Staging refuses the one failure a rename is prone to
+            // (a directory in the way), so this is not expected to run.
+            if let Some(before) = &before {
+                let _ = session.restore(before);
+            }
+            return Err(format!("could not save a drawing: {error}"));
+        }
     }
     Ok(())
 }
@@ -409,6 +422,22 @@ mod tests {
         let saved = dir.join("q.sketch.png");
         assert!(!saved.symlink_metadata().unwrap().is_symlink());
         assert_eq!(std::fs::read(&saved).unwrap(), b"\x89PNG\r\n\x1a\n");
+    }
+
+    #[test]
+    fn a_directory_in_the_way_is_refused_before_the_markdown_is_written() {
+        let dir = scratch("directory");
+        std::fs::create_dir(dir.join("q.sketch.png")).unwrap();
+        let mut session = Session::load(&dir.join("q.md")).unwrap();
+        let result = commit(&mut session, true, &mut answer(), &drawing());
+        assert!(result.is_err(), "{result:?}");
+        assert!(dir.join("q.sketch.png").is_dir());
+        assert!(
+            !std::fs::read_to_string(dir.join("q.md"))
+                .unwrap()
+                .contains("askdown:answer")
+        );
+        assert!(no_temporaries(&dir));
     }
 
     #[test]

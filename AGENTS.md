@@ -89,8 +89,9 @@ renderer は「`collect` を返す」か「`{ collect, drawing }` を返す」�
   以外は `_` に落とし、落とした場合は元の id のハッシュを付けて `a.b` と `a/b` が
   衝突しないようにする)。PNG は `submit` に同梱して Rust の `commit` が書く: 一時ファイルに
   書く → Markdown を保存 → rename、の順。Markdown の保存が失敗したら PNG は差し替えない
-  (古い回答が未提出の絵を指すのを防ぐ)。rename は既存の symlink / hard link を辿らず
-  差し替える。`--no-write` でも PNG は書く (それが回答なので)。
+  (古い回答が未提出の絵を指すのを防ぐ)。保存先がディレクトリなら stage の時点で弾き
+  (rename で置き換えられない唯一の現実的なケース)、それでも rename が失敗したら Markdown を
+  保存前の内容に戻す。rename は既存の symlink / hard link を辿らず差し替える。`--no-write` でも PNG は書く (それが回答なので)。
 - `color`: `<input type=color>` は必ず値を持つので、テキスト欄を正とし、空なら未回答。
 - `src` が無い `point` のように入力を作れない質問は `unusable` で表示し、`required` なら
   submit を止める (そうしないと必須のまま未回答で正常終了できる)。
