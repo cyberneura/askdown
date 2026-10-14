@@ -1,0 +1,155 @@
+:root {
+  color-scheme: light dark;
+  --bg: #fafafa;
+  --fg: #1d1d1f;
+  --muted: #6e6e73;
+  --card: #ffffff;
+  --border: #d2d2d7;
+  --accent: #0a66d8;
+  --danger: #c4314b;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", sans-serif;
+  font-size: 15px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1c1c1e;
+    --fg: #f2f2f7;
+    --muted: #98989d;
+    --card: #2c2c2e;
+    --border: #3a3a3c;
+    --accent: #4c9aff;
+    --danger: #ff6b81;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+}
+
+.header,
+.footer {
+  flex: none;
+  padding: 8px 16px;
+  border-color: var(--border);
+  border-style: solid;
+  border-width: 0;
+}
+
+.header {
+  border-bottom-width: 1px;
+}
+
+.path {
+  color: var(--muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.document {
+  flex: 1;
+  overflow: auto;
+  padding: 16px 24px 32px;
+}
+
+.prose img,
+.prose video {
+  max-width: 100%;
+}
+
+.question {
+  margin: 16px 0;
+  padding: 12px 16px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.question.missing {
+  border-color: var(--danger);
+}
+
+.question .number {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.option {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  cursor: pointer;
+}
+
+input.text,
+input.other,
+textarea.text {
+  width: 100%;
+  margin-top: 8px;
+  padding: 6px 8px;
+  font: inherit;
+  color: inherit;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.error,
+.unsupported {
+  color: var(--danger);
+  white-space: pre-wrap;
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-top-width: 1px;
+}
+
+.status {
+  color: var(--danger);
+  font-size: 13px;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+}
+
+button {
+  padding: 6px 16px;
+  font: inherit;
+  color: inherit;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+button.primary {
+  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+}

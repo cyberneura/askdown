@@ -1,0 +1,21 @@
+[package]
+name = "askdown"
+description = "Opens a window that asks the questions written in a Markdown file and writes the answers back"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "askdown"
+path = "src/main.rs"
+
+[dependencies]
+askdown-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+clap = { version = "4", features = ["derive"] }
+tauri = "2"
+
+[build-dependencies]
+tauri-build = "2"

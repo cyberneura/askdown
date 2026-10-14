@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The window only calls the commands askdown registers itself, which need no grant. Core plugins stay denied until a feature needs one.",
+  "windows": ["main"],
+  "permissions": []
+}

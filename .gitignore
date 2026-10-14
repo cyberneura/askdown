@@ -1,0 +1,9 @@
+/target
+
+# Written by tauri-build on every GUI build (permission schemas for the editor).
+# Regenerated from tauri.conf.json, so there is nothing to keep.
+/crates/askdown-cli/gen
+
+
+# Local Claude Code settings of whoever is working here.
+/.claude/settings.local.json

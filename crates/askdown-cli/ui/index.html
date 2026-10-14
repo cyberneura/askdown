@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>askdown</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header class="header">
+      <div class="path" id="path">Loading…</div>
+    </header>
+
+    <form id="questions" class="document" novalidate></form>
+
+    <footer class="footer">
+      <div class="status" id="status" aria-live="polite"></div>
+      <div class="actions">
+        <button id="cancel" type="button">Cancel</button>
+        <button id="submit" type="submit" form="questions" class="primary">Submit</button>
+      </div>
+    </footer>
+
+    <script src="app.js"></script>
+  </body>
+</html>
