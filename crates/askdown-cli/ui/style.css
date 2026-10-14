@@ -290,6 +290,11 @@ button.primary {
 
 /* draw */
 
+canvas.drawing.loading {
+  opacity: 0.4;
+  cursor: progress;
+}
+
 canvas.drawing {
   display: block;
   max-width: 100%;

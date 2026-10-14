@@ -329,6 +329,10 @@ function renderDraw(segment, body) {
   const strokes = [];
   let current = null;
   let image = null;
+  // While the background is loading the canvas has a placeholder size, so a
+  // stroke made then would land in the wrong place once it is resized, and an
+  // export would lack the background. Nothing is accepted until it has loaded.
+  let loading = false;
 
   const paint = (stroke, from = 0) => {
     context.strokeStyle = stroke.color;
@@ -368,15 +372,22 @@ function renderDraw(segment, body) {
   // background now, and new strokes go on top.
   const background = previous?.path ?? question.src;
   if (background) {
+    loading = true;
+    canvas.classList.add("loading");
     image = new Image();
     // Without this the canvas is tainted by the picture (it comes from another
     // origin) and cannot be exported.
     image.crossOrigin = "anonymous";
-    image.addEventListener("load", size);
+    const ready = () => {
+      loading = false;
+      canvas.classList.remove("loading");
+      size();
+    };
+    image.addEventListener("load", ready);
     image.addEventListener("error", () => {
       statusLine.textContent = `Could not load ${background}`;
       image = null;
-      size();
+      ready();
     });
     image.src = mediaUrl(background);
   }
@@ -394,7 +405,7 @@ function renderDraw(segment, body) {
     };
   };
   canvas.addEventListener("pointerdown", (event) => {
-    if (event.button !== 0) return;
+    if (event.button !== 0 || loading) return;
     canvas.setPointerCapture(event.pointerId);
     current = { color: color.value, width: Number(width.value), points: [position(event)] };
     strokes.push(current);
@@ -425,6 +436,7 @@ function renderDraw(segment, body) {
 
   return {
     collect: () => {
+      if (loading) throw new Error(`${id}: the background is still loading`);
       if (strokes.length) return { width: canvas.width, height: canvas.height };
       // Nothing added: the earlier picture is still the answer, as it is on disk.
       return previous?.path ? previous : null;
