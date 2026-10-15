@@ -140,12 +140,29 @@ still saved, since that file is the answer.
 
 See [`examples/`](examples/) for a file with every kind of question.
 
+## For agents: the skill
+
+[`skills/askdown/SKILL.md`](skills/askdown/SKILL.md) tells an AI agent when to reach for
+askdown, how to write the questions, and what comes back. It is a plain
+`skills/<name>/SKILL.md` directory, so any tool that reads that layout can install it.
+
+### With `npx skills` (Claude Code, Codex, Cursor, OpenCode, …)
+
+```shell
+npx skills add cyberneura/askdown --list              # see what the repo offers
+npx skills add cyberneura/askdown --skill askdown     # into ./<agent>/skills (this project)
+npx skills add cyberneura/askdown --skill askdown -g  # into ~/<agent>/skills (all projects)
+```
+
+Installing the skill does not install askdown; see [Install](#install) for that.
+
 ## Layout
 
 ```
 crates/askdown-core   parsing, answer write-back, Markdown rendering (no IO)
 crates/askdown-cli    the askdown binary: command line + Tauri window (ui/)
 examples/             sample question files
+skills/               the agent skill (SKILL.md)
 ```
 
 ## Development
