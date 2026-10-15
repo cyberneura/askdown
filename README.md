@@ -12,6 +12,26 @@ Questions can be multiple choice (text or pictures), free text, a point on an
 image or a video frame, a freehand drawing, a colour, or a span of an audio or
 video file.
 
+## Install
+
+On macOS (Apple Silicon), through Homebrew:
+
+```sh
+brew install --cask cyberneura/tap/askdown
+```
+
+Or from source, on macOS or Linux:
+
+```sh
+cargo install --path crates/askdown-cli
+```
+
+Each installs the `askdown` binary. It is a desktop window, so it needs the
+system webview: WebKit on macOS, and on Linux `libwebkit2gtk-4.1` (plus GTK 3),
+both to build and to run. The Linux archive on the
+[releases page](https://github.com/cyberneura/askdown/releases) is built on
+Ubuntu and expects that library to be installed.
+
 ## Usage
 
 ```sh
@@ -152,6 +172,21 @@ cargo test
 cargo run -p askdown -- examples/media.md
 ```
 
+Releases follow the version in `Cargo.toml`: `scripts/release.sh [patch|minor|major]`
+bumps it and pushes `main`, and the release workflow builds, signs and publishes
+that version. The Homebrew tap picks the release up by itself.
+
 ## License
 
-MIT
+MIT. The libraries compiled into askdown have their own licenses, listed in
+[THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt) and printed by
+`askdown --license`. The file is generated; after adding or upgrading a
+dependency, generate it again and commit the result:
+
+```sh
+cargo install cargo-about --locked --features cli   # once
+scripts/generate-third-party-notices.sh
+```
+
+`cargo test` fails when a direct dependency is missing from the file or a listed
+crate is no longer in `Cargo.lock`.
