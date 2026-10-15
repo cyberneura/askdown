@@ -5,4 +5,5 @@
 
 pub mod gui;
 pub mod media;
+pub mod notices;
 pub mod session;

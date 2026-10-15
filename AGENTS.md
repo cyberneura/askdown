@@ -118,6 +118,40 @@ FNV ハッシュ 16 桁を `.` で付ける。200 バイトを超える名前は
 
 README の表が正。追加・変更したら README と `examples/media.md` も直す。
 
+## CI とリリース
+
+`.github/workflows/test.yml` が PR のチェックで、`release.yml` から `uses:` で呼ばれて
+リリースの門番にもなる (呼ばれた job は呼び出し元の run に入るので `needs` が効く)。
+macOS と Ubuntu の両方で clippy (`-D warnings`) とテストを回す。Ubuntu には apt で
+webkit2gtk 4.1 を入れる (askdown は GUI 専用で feature 分割が無い)。
+
+**`Cargo.toml` の version を main で変えると、それがリリースになる。** `release.yml` は
+main への push すべてで起動し、その version の Release が公開済みか (404 だけを「未公開」と
+読む) で判断する。何度実行しても安全で、失敗したリリースは原因を直して push すれば続きになる。
+`scripts/release.sh [patch|minor|major]` は version を 3 箇所 (workspace の `version`、
+`askdown-core` 依存の `version`、`tauri.conf.json`) + `Cargo.lock` で上げて push する薄い
+スクリプト。
+
+- macOS は arm64 のみ、Developer ID 署名 + 公証 (secrets `APPLE_*` は投入済み)。素の
+  バイナリは staple できないので Gatekeeper がオンラインでチケットを引く。
+- Linux は x86_64、webkit2gtk 4.1 に動的リンクしたバイナリ (実行環境に要る。README に記載)。
+- Release は draft で作ってアセット数 (2) を数えてから公開する。
+- Homebrew cask はこのリポジトリでは触らない。`cyberneura/homebrew-tap` の workflow が毎時
+  最新 Release を見て `Casks/askdown.rb` を更新する (cask の `binary` パスはアーカイブ内の
+  ディレクトリ名 `askdown-v<version>-aarch64-apple-darwin/askdown` に揃える)。
+- crates.io はリポジトリ変数 `PUBLISH_CRATES=true` と secret `CARGO_REGISTRY_TOKEN` で
+  有効化する (未設定)。「push で続きになる」のは GitHub Release までで、Release 公開後に
+  `crates` job だけが失敗した場合は `plan` が「公開済み」と判定して何もしない。その時は
+  Actions の「failed jobs を再実行」で `crates` を回す。`askdown` クレートの publish は `--no-verify` (tauri-build が
+  `gen/schemas/` をソースに書くので検証ビルドが拒否される)。
+
+## ライセンス表示
+
+`THIRD-PARTY-NOTICES.txt` は `scripts/generate-third-party-notices.sh` (cargo-about、
+`about.toml`) で生成し、`crates/askdown-cli/` からの symlink 越しに `notices.rs` が
+`include_str!` する (`askdown --license`)。`tests/third_party_notices.rs` が Cargo.lock と
+突き合わせるので、依存を足したり上げたりしたら再生成してコミットする。
+
 ## 検証
 
 ```sh
@@ -146,7 +180,5 @@ examples の Markdown を直接答えると書き戻しで変更されるので�
 
 - アイコン (今は runandlog のものを仮置き。`scripts/generate-icon.py` を runandlog から
   持ってきて askdown の意匠にする)
-- リリース (runandlog の `release.yml` / `scripts/release.sh` / Homebrew tap を参考に)、
-  サードパーティライセンス表示 (`about.toml` / `generate-third-party-notices.sh`)
 - Linux の実機確認 (CI では Ubuntu で clippy とテストを通しているだけ)。Windows は CI にも
   入っていない (`media::base_url` の `http://askdown.localhost/` 形は未検証)
