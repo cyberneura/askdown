@@ -21,7 +21,14 @@ use clap::Parser;
 #[command(name = "askdown", version, about, long_about)]
 struct Args {
     /// The Markdown file holding the questions.
-    file: PathBuf,
+    // An `Option` only so that `--license` can go without it: clap still requires
+    // it otherwise.
+    #[arg(required_unless_present = "license")]
+    file: Option<PathBuf>,
+
+    /// Print the license of askdown and of the libraries it is built from, and exit.
+    #[arg(long, exclusive = true)]
+    license: bool,
 
     /// Print the questions found in the file and exit, without opening a window.
     #[arg(short, long)]
@@ -42,6 +49,9 @@ struct Args {
 
 fn main() -> ExitCode {
     let args = Args::parse();
+    if args.license {
+        return print_license();
+    }
     match dispatch(args) {
         Ok(code) => code,
         Err(error) => {
@@ -51,8 +61,32 @@ fn main() -> ExitCode {
     }
 }
 
+/// `--license`: prints the licences and exits.
+///
+/// Written rather than `print!`ed: piped into `head` or a pager that quits early,
+/// `print!` panics on the closed pipe instead of just stopping. A closed pipe is
+/// the reader having seen enough, so it is a success; any other failure (a full
+/// disk, say) means the text did not get where it was sent, and says so.
+fn print_license() -> ExitCode {
+    let text = askdown::notices::license_text();
+    let mut stdout = std::io::stdout().lock();
+    let written = std::io::Write::write_all(&mut stdout, text.as_bytes())
+        .and_then(|()| std::io::Write::flush(&mut stdout));
+    match written {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) if error.kind() == std::io::ErrorKind::BrokenPipe => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("askdown: could not print the license: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 fn dispatch(args: Args) -> std::io::Result<ExitCode> {
-    let session = Session::load(&args.file)?;
+    let Some(file) = args.file.as_deref() else {
+        return Err(std::io::Error::other("no Markdown file given"));
+    };
+    let session = Session::load(file)?;
 
     if args.list {
         print_list(&session);
