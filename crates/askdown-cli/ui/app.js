@@ -141,6 +141,12 @@ function renderChoice(segment, body) {
   };
 }
 
+// A multiline answer grows with its text, from a little under the old fixed
+// five rows up to twice that, and scrolls beyond. A short default does not
+// open a tall empty box; a long one is not hidden behind a scrollbar.
+const TEXTAREA_MIN_ROWS = 4;
+const TEXTAREA_MAX_ROWS = 10;
+
 function renderText(segment, body) {
   const { question, previous } = segment;
   const attributes = {
@@ -148,11 +154,38 @@ function renderText(segment, body) {
     class: "text",
   };
   const field = question.multiline
-    ? element("textarea", { ...attributes, rows: 5 })
+    ? element("textarea", { ...attributes, rows: TEXTAREA_MIN_ROWS })
     : element("input", { ...attributes, type: "text" });
   field.value = previous ?? question.default ?? "";
   body.append(field);
+  if (question.multiline) autosize(field);
   return () => (field.value.trim() === "" ? null : field.value);
+}
+
+function autosize(field) {
+  const resize = () => {
+    const style = getComputedStyle(field);
+    const fontSize = parseFloat(style.fontSize) || 16;
+    const line = parseFloat(style.lineHeight) || fontSize * 1.2;
+    const frame =
+      parseFloat(style.paddingTop) +
+      parseFloat(style.paddingBottom) +
+      parseFloat(style.borderTopWidth) +
+      parseFloat(style.borderBottomWidth);
+    const min = line * TEXTAREA_MIN_ROWS + frame;
+    const max = line * TEXTAREA_MAX_ROWS + frame;
+    // Collapse first: scrollHeight never reports less than the current height.
+    field.style.height = `${min}px`;
+    // scrollHeight covers the padding but not the border (box-sizing is border-box).
+    const content = field.scrollHeight + parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
+    field.style.height = `${Math.min(Math.max(content, min), max)}px`;
+    field.style.overflowY = content > max ? "auto" : "hidden";
+  };
+  field.addEventListener("input", resize);
+  // Wrapping, and so the height, changes with the window width.
+  window.addEventListener("resize", resize);
+  // Measured once laid out; the form is attached to the document after rendering.
+  requestAnimationFrame(resize);
 }
 
 function renderMediaChoice(segment, body) {

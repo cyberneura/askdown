@@ -128,7 +128,7 @@ checksum = "7d902e3d592a523def97af8f317b08ce16b7ab854c1985a0c671e6f15cebc236"
 
 [[package]]
 name = "askdown"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "askdown-core",
  "base64 0.22.1",
@@ -143,7 +143,7 @@ dependencies = [
 
 [[package]]
 name = "askdown-core"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ammonia",
  "pulldown-cmark",
