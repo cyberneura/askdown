@@ -115,6 +115,14 @@ textarea.text {
   border-radius: 6px;
 }
 
+/* A fixed line height so autosize (ui/app.js) can count rows; "normal" has no
+   number to read. Resizing by hand is off because autosize sets the height on
+   every keystroke and would undo it. */
+textarea.text {
+  line-height: 1.4;
+  resize: none;
+}
+
 .error,
 .unsupported {
   color: var(--danger);
