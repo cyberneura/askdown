@@ -36,7 +36,7 @@ Ubuntu and expects that library to be installed.
 
 ```sh
 askdown questions.md            # open the window, wait for the answers
-askdown --list questions.md     # print the questions found, no window
+askdown --list questions.md     # print the questions found, no window; exit 1 if a block cannot be read
 askdown --no-write questions.md # answers on stdout only
 askdown --timeout 600 questions.md
 ```
@@ -44,7 +44,7 @@ askdown --timeout 600 questions.md
 | Exit code | Meaning |
 | --- | --- |
 | 0 | Answered. JSON on stdout. |
-| 1 | Error (file not found, no questions, …). |
+| 1 | Error (file not found, no questions, a question block that cannot be read, …). stderr says why. A file that cannot be read opens no window. |
 | 2 | Cancelled: closed without submitting. |
 | 3 | Timed out (`--timeout`). |
 

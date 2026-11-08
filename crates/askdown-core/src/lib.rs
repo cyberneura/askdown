@@ -13,5 +13,5 @@ pub mod parse;
 pub mod question;
 
 pub use answer::{Answer, AnswerSet, write_back};
-pub use parse::{Block, Document, Segment, parse};
+pub use parse::{Block, Document, Segment, invalid_blocks, parse};
 pub use question::{ChoiceOption, Question, QuestionKind};

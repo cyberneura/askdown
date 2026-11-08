@@ -152,6 +152,27 @@ pub fn parse(source: &str) -> Document {
     Document { segments, blocks }
 }
 
+/// One message for each question block that could not be read, in file order.
+///
+/// `source` must be what `document` was parsed from. The block's position is
+/// given as the line of its opening fence, because the YAML error counts lines
+/// from the start of the block's body, not from the start of the file.
+pub fn invalid_blocks(source: &str, document: &Document) -> Vec<String> {
+    document
+        .blocks
+        .iter()
+        .filter_map(|block| {
+            let error = block.question.as_ref().err()?;
+            let line = source[..block.range.start].matches('\n').count() + 1;
+            Some(format!(
+                "question {} (opening fence on line {line}; lines in the error count from \
+                 the line after the fence):\n{error}",
+                block.number
+            ))
+        })
+        .collect()
+}
+
 fn push_prose(segments: &mut Vec<Segment>, text: &str) {
     if !text.trim().is_empty() {
         segments.push(Segment::Prose(text.to_string()));
@@ -198,6 +219,22 @@ mod tests {
         let document = parse("```askdown\ntype: [\n```\n");
         assert_eq!(document.blocks.len(), 1);
         assert!(document.blocks[0].question.is_err());
+    }
+
+    #[test]
+    fn invalid_blocks_name_each_broken_question_and_where_it_starts() {
+        let source = "# Title\n\n```askdown\ntype: text\n```\n\n```askdown\ntype: slider\n```\n\n```askdown\nquestion: a: b\n```\n";
+        let problems = invalid_blocks(source, &parse(source));
+        assert_eq!(problems.len(), 2);
+        assert!(problems[0].starts_with("question 2 (opening fence on line 7;"));
+        assert!(problems[0].contains("slider"));
+        assert!(problems[1].starts_with("question 3 (opening fence on line 11;"));
+    }
+
+    #[test]
+    fn readable_questions_have_no_invalid_blocks() {
+        let source = "```askdown\ntype: text\n```\n";
+        assert!(invalid_blocks(source, &parse(source)).is_empty());
     }
 
     #[test]

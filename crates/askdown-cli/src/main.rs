@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use askdown::gui::{self, EXIT_CANCELLED, EXIT_TIMED_OUT, Outcome};
 use askdown::session::Session;
+use askdown_core::invalid_blocks;
 use clap::Parser;
 
 /// Opens a window that asks the questions written in a Markdown file, and
@@ -14,6 +15,9 @@ use clap::Parser;
 /// Questions are fenced code blocks with the info string `askdown`, holding
 /// YAML. The answers are printed to stdout as JSON keyed by question id, and
 /// written back into the file right after each question.
+///
+/// A block that cannot be read is an error: askdown reports it on stderr and
+/// exits with code 1 without opening a window.
 ///
 /// Exit codes: 0 answered, 1 error, 2 cancelled (window closed without
 /// submitting), 3 timed out.
@@ -90,8 +94,10 @@ fn dispatch(args: Args) -> std::io::Result<ExitCode> {
 
     if args.list {
         print_list(&session);
+        check_blocks(&session)?;
         return Ok(ExitCode::SUCCESS);
     }
+    check_blocks(&session)?;
     if session.document().blocks.is_empty() {
         return Err(std::io::Error::other(format!(
             "no ```askdown question blocks in {}",
@@ -122,6 +128,24 @@ fn dispatch(args: Args) -> std::io::Result<ExitCode> {
             ExitCode::from(EXIT_TIMED_OUT as u8)
         }
     })
+}
+
+/// Refuses a file with a block that cannot be read, before any window opens.
+///
+/// The caller is usually an AI agent waiting on the exit code. A window showing
+/// the error would tell it nothing, and the person looking at the window cannot
+/// fix the file; stderr and exit code 1 send the mistake back to whoever wrote it.
+fn check_blocks(session: &Session) -> std::io::Result<()> {
+    let problems = invalid_blocks(session.source(), session.document());
+    if problems.is_empty() {
+        return Ok(());
+    }
+    Err(std::io::Error::other(format!(
+        "{}: {} question block(s) could not be read. Fix the file and run askdown again.\n\n{}",
+        session.path().display(),
+        problems.len(),
+        problems.join("\n\n")
+    )))
 }
 
 fn print_list(session: &Session) {
