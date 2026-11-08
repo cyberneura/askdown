@@ -51,7 +51,8 @@ askdown --timeout 600 questions.md
 ## Writing the questions
 
 A question is a fenced code block with the info string `askdown`, holding YAML.
-Everything else in the file is shown as Markdown around the questions.
+Everything else in the file is shown as Markdown around the questions. Code blocks
+wrap their long lines and have a button that copies their text.
 
 ````markdown
 Which environment should I deploy to? See the [design doc](https://example.com).

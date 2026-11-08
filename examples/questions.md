@@ -3,6 +3,12 @@
 I am about to deploy the new search page. A few things to confirm first.
 See the [design doc](https://example.com/design) for context.
 
+The command I will run:
+
+```sh
+./scripts/deploy.sh --env "$TARGET" --flags "$FEATURES" --wait-for-health-check --notify-channel "#deploys" --rollback-on-failure
+```
+
 ```askdown
 id: target
 type: choice
