@@ -37,6 +37,14 @@ README・コードコメント・UI 文字列・エラーメッセージはす�
   ハンドラを通さない。`<video>` / `<audio>` は質問の用途上許可している。
   フロントエンドはビルド工程を持たない素の JS (runandlog と同じ)。
 
+## コードブロック (`wrapCodeBlock`、`ui/app.js`)
+
+`trustedHtml` が Markdown の `<pre>` を `.code-block` で包み、隣にコピーボタンを置く (ボタンを
+`<pre>` の中に入れるとコピーや選択の対象に混ざる)。背景はライト / ダークとも黒で、長い行は
+折り返す。コピーは `navigator.clipboard` をクリックから await 無しで直接呼ぶ (runandlog と同じ。
+WebKit はユーザー操作の間しか書き込みを許さない。プラグインは足さない)。末尾の改行は除く
+(pulldown-cmark が必ず付けるもので、端末に貼るとコマンドが実行される)。
+
 ## ローカルファイルの表示 (`media.rs`)
 
 - **カスタム URI スキーム `askdown`** を `register_uri_scheme_protocol` で登録し、

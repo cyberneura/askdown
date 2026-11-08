@@ -72,6 +72,49 @@ body {
   max-width: 100%;
 }
 
+/* Code blocks: black in both colour schemes. Long lines wrap, so nothing scrolls
+   sideways, and the right padding keeps the text out from under the copy button. */
+.code-block {
+  position: relative;
+  margin: 1em 0;
+}
+
+.code-block pre {
+  margin: 0;
+  padding: 12px 40px 12px 14px;
+  color: #f2f2f7;
+  background: #000;
+  border-radius: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.code-block code {
+  font: inherit;
+}
+
+.code-copy {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  padding: 2px;
+  color: #a1a1a6;
+  background: none;
+  border: none;
+}
+
+.code-copy:hover {
+  color: #fff;
+}
+
+.code-copy.copied {
+  color: #30d158;
+}
+
 .question {
   margin: 16px 0;
   padding: 12px 16px;

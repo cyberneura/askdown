@@ -29,7 +29,7 @@ function element(tag, attributes = {}, children = []) {
 
 function button(text, onClick, attributes = {}) {
   const node = element("button", { type: "button", ...attributes, text });
-  node.addEventListener("click", onClick);
+  if (onClick) node.addEventListener("click", onClick);
   return node;
 }
 
@@ -37,7 +37,47 @@ function button(text, onClick, attributes = {}) {
 function trustedHtml(html) {
   const holder = element("div", { class: "prose" });
   holder.innerHTML = html;
+  for (const pre of holder.querySelectorAll("pre")) wrapCodeBlock(pre);
   return holder;
+}
+
+const COPIED_MS = 3000;
+const COPY_ICON =
+  '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 3.5v-.5a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h.5"/></svg>';
+const CHECK_ICON =
+  '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5l3.5 3.5L13 4.5"/></svg>';
+
+// The button sits next to the <pre> rather than inside it, so it stays out of the
+// text being copied and of the selection.
+function wrapCodeBlock(pre) {
+  const copy = button("", null, { class: "code-copy", title: "Copy", "aria-label": "Copy" });
+  copy.innerHTML = COPY_ICON;
+  let timer;
+  copy.addEventListener("click", async () => {
+    // Called straight from the click, before anything is awaited: WebKit only allows
+    // a clipboard write while the press still counts as user activation. There is no
+    // clipboard plugin on purpose, as in runandlog: the webview already does this.
+    // The Markdown renderer ends every code block with a newline. It is not part of
+    // the text, and pasted into a terminal it would run the command.
+    try {
+      await navigator.clipboard.writeText(pre.textContent.replace(/\r?\n$/, ""));
+    } catch (error) {
+      statusLine.textContent = `Could not copy: ${error}`;
+      return;
+    }
+    copy.innerHTML = CHECK_ICON;
+    copy.classList.add("copied");
+    copy.setAttribute("aria-label", "Copied");
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      copy.innerHTML = COPY_ICON;
+      copy.classList.remove("copied");
+      copy.setAttribute("aria-label", "Copy");
+    }, COPIED_MS);
+  });
+  const wrapper = element("div", { class: "code-block" });
+  pre.replaceWith(wrapper);
+  wrapper.append(pre, copy);
 }
 
 // Media paths in the YAML are relative to the Markdown file, like those in the
