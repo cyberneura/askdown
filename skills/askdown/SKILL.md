@@ -18,8 +18,8 @@ desktop session; it does not work over a plain SSH shell.
 ## The loop
 
 1. Write the questions into a Markdown file. Put it next to any media it refers to.
-2. Check it: `askdown --list questions.md` prints the questions found (no window) and shows
-   a YAML error inline if a block cannot be read.
+2. Check it: `askdown --list questions.md` prints the questions found (no window). If a block
+   cannot be read, it exits with code 1 and stderr gives the question and the YAML error.
 3. Run `askdown questions.md` and wait. Give a timeout when the run must not hang forever:
    `askdown --timeout 900 questions.md`.
 4. Read the exit code, then stdout.
@@ -27,7 +27,7 @@ desktop session; it does not work over a plain SSH shell.
 | Exit | Meaning | What to do |
 |---|---|---|
 | 0 | Answered; stdout holds one JSON object keyed by question id | Use the answers |
-| 1 | Error (file missing, no question blocks, write-back failed); stderr says why | Fix the file |
+| 1 | Error (file missing, no question blocks, a block that cannot be read, write-back failed); stderr says why and no window opened if the file is at fault | Fix the file and run again |
 | 2 | Cancelled: the person closed the window without submitting | Do not retry blindly; ask in chat what they want |
 | 3 | Timed out (`--timeout`) | Same as cancelled |
 
