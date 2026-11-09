@@ -2,6 +2,8 @@
 
 Ask a person questions from a Markdown file, in a desktop window.
 
+Website: https://www.cyberneura.com/app/askdown
+
 An AI agent writes its questions into a Markdown file and runs `askdown` on it.
 A window opens showing the Markdown (links, images, video) with an input for each
 question. When the user presses **Submit**, the answers are printed to stdout as
