@@ -48,6 +48,12 @@ README・コードコメント・UI 文字列・エラーメッセージはす�
 WebKit はユーザー操作の間しか書き込みを許さない。プラグインは足さない)。末尾の改行は除く
 (pulldown-cmark が必ず付けるもので、端末に貼るとコマンドが実行される)。
 
+## 表 (`wrapTable`、`ui/app.js`)
+
+`trustedHtml` が Markdown の `<table>` を `.table-scroll` で包む。窓より広い表は、このラッパーの
+中だけが横スクロールする (周りの文章と質問は動かない)。セルの背景は `--card`、見出しは
+`--table-head`、見出しは左揃え。
+
 ## ローカルファイルの表示 (`media.rs`)
 
 - **カスタム URI スキーム `askdown`** を `register_uri_scheme_protocol` で登録し、

@@ -38,7 +38,16 @@ function trustedHtml(html) {
   const holder = element("div", { class: "prose" });
   holder.innerHTML = html;
   for (const pre of holder.querySelectorAll("pre")) wrapCodeBlock(pre);
+  for (const table of holder.querySelectorAll("table")) wrapTable(table);
   return holder;
+}
+
+// The wrapper scrolls, not the document: a table too wide for the window moves on its
+// own and the text and questions around it stay where they are.
+function wrapTable(table) {
+  const wrapper = element("div", { class: "table-scroll" });
+  table.replaceWith(wrapper);
+  wrapper.append(table);
 }
 
 const COPIED_MS = 3000;
