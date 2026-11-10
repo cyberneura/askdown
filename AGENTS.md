@@ -199,3 +199,17 @@ examples の Markdown を直接答えると書き戻しで変更されるので�
   持ってきて askdown の意匠にする)
 - Linux の実機確認 (CI では Ubuntu で clippy とテストを通しているだけ)。Windows は CI にも
   入っていない (`media::base_url` の `http://askdown.localhost/` 形は未検証)
+
+## macOS app icon
+
+Run `bash scripts/generate-macos-icons.sh` with Xcode on macOS. Fixed artwork,
+layout measurements, size-specific sources and the verification command are in
+`resources/app-icons/README.md`. Small @1x backgrounds reach the canvas edges;
+the glyph fits inside the central 80%. Larger backgrounds have 10% outer margins.
+Do not replace the generated ICNS with `tauri icon` / `iconutil`: preserve the
+ARGB small entries and the matching Assets.car / CFBundleIconName registration.
+Native rendering is verified by `.github/workflows/macos-icons.yml`.
+
+The distributed CLI is a bare executable: its GUI embeds ICNS and sets
+NSApplication’s icon at startup. Bundle registration applies only to optional
+.app builds; it cannot give a bare binary a System Settings bundle icon.
