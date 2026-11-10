@@ -24,3 +24,9 @@ percent-encoding = "2"
 
 [build-dependencies]
 tauri-build = "2"
+
+# AppKit access for the bare executable's Dock icon.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = { version = "0.6" }
+objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSImage", "NSResponder"] }
+objc2-foundation = { version = "0.3", features = ["NSData"] }
