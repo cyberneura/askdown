@@ -1,7 +1,10 @@
 # macOS app icons
 
-Run `bash scripts/generate-macos-icons.sh` on macOS with Xcode. The fixed master
-`mac-original.png` and measured rectangles in `layout.json` are the inputs.
+`python3 scripts/generate-icon.py` writes the fixed master `mac-original.png`, the
+rectangles in `layout.json` and the bundle copy `crates/askdown-cli/icons/icon.png`
+from named constants; edit the script, never the PNG. Then run
+`bash scripts/generate-macos-icons.sh` on macOS with Xcode. The master and
+`layout.json` are its inputs.
 The preparation tool preserves the existing design and aspect ratio. Larger
 representations put the background within the central 80% (10% on each edge).
 16pt and 32pt @1x use a full-bleed background, with the glyph fitted into the

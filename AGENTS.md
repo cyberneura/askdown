@@ -193,10 +193,24 @@ examples の Markdown を直接答えると書き戻しで変更されるので�
 - 画面の下の方は `click` が自動でスクロールして見せる。座標クリックの前に screenshot を
   取り直し、その間にスクロールしない。
 
+## アプリアイコン
+
+白の疑問符に紫のグラデーション。**手で描かずに `scripts/generate-icon.py` で生成する**
+(標準ライブラリだけで動き、同じソースから同じバイト列が出る。このリポジトリに画像ツールチェーンは
+無く、アセット 1 枚のために足す価値も無い)。スクリプトが `resources/app-icons/mac-original.png`、
+その複製の `crates/askdown-cli/icons/icon.png` (`tauri.conf.json` の `bundle.icon`)、
+`resources/app-icons/layout.json` の 3 つを書く。layout.json の glyph 矩形は描いた図形から
+計算するので、手で測って原画像とずれることがない。図柄や色を変えたらスクリプトを直して
+再生成し、`bash scripts/generate-macos-icons.sh` でサイズ別画像へ反映する (下記)。
+
+図柄は signed distance function (円弧 + カプセルの縦棒 + 点) で描き、角丸四角の本体は
+macOS のテンプレート寸法 (1024 のキャンバスに 824 の本体、角丸 22.5%) を定数で持つ。
+図柄は白、地は赤成分の低い色にする。サイズ別画像の生成 (`prepare-macos-icons.swift`) が
+図柄のアルファを「各画素の赤成分が地よりどれだけ高いか」から復元するため、色付きの図柄や
+赤の強い地では壊れる。
+
 ## 未実装
 
-- アイコン (今は runandlog のものを仮置き。`scripts/generate-icon.py` を runandlog から
-  持ってきて askdown の意匠にする)
 - Linux の実機確認 (CI では Ubuntu で clippy とテストを通しているだけ)。Windows は CI にも
   入っていない (`media::base_url` の `http://askdown.localhost/` 形は未検証)
 
