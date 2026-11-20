@@ -85,6 +85,11 @@ multiline: true
 Unknown fields are an error (a typo like `mutliple` is refused rather than ignored), so
 always run `--list` after writing.
 
+Options and their `label` / `value` must be strings. Quote anything YAML reads as another type
+(`"yes"`, `"no"`, `"on"`, `"off"`, `"true"`, `"1"`, `"null"`), or the block is refused with
+`did not match any variant of untagged enum ChoiceOption`. Quote such a `default` too: it is not
+refused, but `default: yes` becomes `"true"` and silently preselects nothing.
+
 Paths: in the Markdown prose a destination is a URL (`shots/my%20layout.png`); in YAML
 `src` it is a plain path (`shots/my layout.png`). Only files in the Markdown file's
 directory and below are served, so keep the media next to the file.
