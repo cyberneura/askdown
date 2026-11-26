@@ -1,228 +1,260 @@
-# askdown 開発メモ
+# askdown development notes
 
-AI エージェントが Markdown に書いた質問を GUI (Tauri) で人間に見せ、回答を stdout (JSON) と
-同じ Markdown に書き戻すツール。AskUserQuestion の拡張版で、それを持たない Codex などで使う。
-仕様と使い方は README.md を参照。ここには開発上の判断と注意点だけを書く。
+A tool that shows questions an AI agent wrote in Markdown to a human in a GUI (Tauri), and writes
+the answers back to stdout (JSON) and to the same Markdown file. It is an extended version of
+AskUserQuestion, meant for agents that do not have one, such as Codex.
+See README.md for the specification and usage. This file records only development decisions and caveats.
 
-構成は姉妹プロジェクト [runandlog](https://github.com/cyberneura/runandlog) に揃えている。
-迷ったら runandlog の実装・AGENTS.md を参照する。
+The layout follows the sister project [runandlog](https://github.com/cyberneura/runandlog).
+When in doubt, refer to runandlog's implementation and AGENTS.md.
 
-## 言語の方針
+## Language policy
 
-README・コードコメント・UI 文字列・エラーメッセージはすべて英語で書く。
-この AGENTS.md (CLAUDE.md はそのシンボリックリンク) だけは日本語。
+Write everything in English: README, all other documentation including this AGENTS.md
+(CLAUDE.md is a symlink to it), code comments, UI strings, and error messages.
 
-## 設計の要点
+## Design essentials
 
-- **UI は GUI だけ。** CLI は起動オプションを受けるためだけにあり、TUI や対話プロンプトで
-  選ばせる機能は作らない (四柳の指示)。`--list` は確認用の表示で、入力 UI ではない。
-- **コアは IO を持たない。** `askdown-core` はパース (`parse`)・質問の型 (`question`)・
-  回答の書き戻し (`answer`)・Markdown → HTML (`markdown`) だけ。ファイルの読み書きは
-  `askdown` クレートの `session` (Markdown と、その隣への書き込み) と `media` (読み出し) が行う。
-- **呼び出しはブロッキング。** エージェントは `askdown file.md` を実行して終了を待ち、
-  stdout の JSON を読む。終了コードで回答 (0) / エラー (1) / キャンセル (2) / タイムアウト (3)
-  を区別する。
-- **質問は ```` ```askdown ```` フェンスの中の YAML。** `Question` は `deny_unknown_fields`。
-  `mutliple` のような typo を黙って無視すると、単一選択に化けて気付けないため。
-  読めないブロックが 1 つでもあれば、窓を開かずに stderr へ位置とエラーを出して exit 1 にする
-  (`main.rs` の `check_blocks`、`--list` も同じ。呼び出し元の AI に直させるため。窓に出しても
-  AI には伝わらず、見ている人間はファイルを直せない。四柳の指示)。`gui.rs` / `app.js` の
-  `error` 表示は CLI からは到達しない。
-- **書き戻しは範囲置換だけ。** `parse` が質問ブロックと回答ブロックのバイト範囲を持ち、
-  `write_back` がそこだけを置き換える。Markdown を再構築しないので原文の書式が残る。
-- **回答は `<!-- askdown:answer -->` 〜 `<!-- /askdown:answer -->` で挟む。** 中身は YAML
-  (人が読むため)。終端マーカーが無い開始マーカーは回答扱いしない (推測で範囲を決めると
-  ユーザーの文章を巻き込むため)。
-- **保存時にファイルを読み直す** (`Session::save`)。ウィンドウを開いている間にエージェントや
-  ユーザーがファイルを編集していても、それを上書きで消さないため。回答は id で対応付ける。
-- **Markdown は Rust 側で HTML にしてサニタイズする** (pulldown-cmark + ammonia)。
-  書くのは AI で、表示先は Tauri の invoke を呼べる webview なので、script やイベント
-  ハンドラを通さない。`<video>` / `<audio>` は質問の用途上許可している。
-  フロントエンドはビルド工程を持たない素の JS (runandlog と同じ)。
+- **The UI is GUI only.** The CLI exists only to accept launch options; do not build features that
+  let the user choose via a TUI or interactive prompts (Yotsuyanagi's instruction). `--list` is a
+  display for checking, not an input UI.
+- **The core has no IO.** `askdown-core` only does parsing (`parse`), question types (`question`),
+  writing answers back (`answer`), and Markdown → HTML (`markdown`). File reading and writing is
+  done by the `askdown` crate's `session` (writing to the Markdown file and next to it) and `media`
+  (reading).
+- **Invocation is blocking.** The agent runs `askdown file.md`, waits for it to exit, and reads
+  the JSON on stdout. The exit code distinguishes answered (0) / error (1) / cancelled (2) /
+  timed out (3).
+- **A question is YAML inside a ```` ```askdown ```` fence.** `Question` uses `deny_unknown_fields`,
+  because silently ignoring a typo such as `mutliple` would turn it into a single choice without
+  anyone noticing.
+  If even one block cannot be read, do not open the window; print the location and the error to
+  stderr and exit 1 (`check_blocks` in `main.rs`; `--list` behaves the same. This is so the calling
+  AI fixes it. Showing it in the window would not reach the AI, and the human looking at it cannot
+  fix the file. Yotsuyanagi's instruction). The `error` display in `gui.rs` / `app.js` is not
+  reachable from the CLI.
+- **Writing back is range replacement only.** `parse` keeps the byte ranges of question blocks and
+  answer blocks, and `write_back` replaces only those. The Markdown is not rebuilt, so the original
+  formatting is preserved.
+- **Answers are enclosed between `<!-- askdown:answer -->` and `<!-- /askdown:answer -->`.** The
+  content is YAML (so people can read it). A start marker without an end marker is not treated as
+  an answer (guessing the range would swallow the user's text).
+- **The file is re-read on save** (`Session::save`), so that edits the agent or the user made to the
+  file while the window was open are not overwritten and lost. Answers are matched by id.
+- **Markdown is converted to HTML and sanitized on the Rust side** (pulldown-cmark + ammonia).
+  The author is an AI and the destination is a webview that can call Tauri's invoke, so scripts and
+  event handlers are not let through. `<video>` / `<audio>` are allowed because questions need them.
+  The frontend is plain JS with no build step (same as runandlog).
 
-## コードブロック (`wrapCodeBlock`、`ui/app.js`)
+## Code blocks (`wrapCodeBlock`, `ui/app.js`)
 
-`trustedHtml` が Markdown の `<pre>` を `.code-block` で包み、隣にコピーボタンを置く (ボタンを
-`<pre>` の中に入れるとコピーや選択の対象に混ざる)。背景はライト / ダークとも黒で、長い行は
-折り返す。コピーは `navigator.clipboard` をクリックから await 無しで直接呼ぶ (runandlog と同じ。
-WebKit はユーザー操作の間しか書き込みを許さない。プラグインは足さない)。末尾の改行は除く
-(pulldown-cmark が必ず付けるもので、端末に貼るとコマンドが実行される)。
+`trustedHtml` wraps each Markdown `<pre>` in `.code-block` and puts a copy button next to it
+(putting the button inside the `<pre>` would mix it into what gets copied or selected). The
+background is black in both light and dark mode, and long lines wrap. Copying calls
+`navigator.clipboard` directly from the click with no await (same as runandlog; WebKit only allows
+writes during a user action. Do not add a plugin). The trailing newline is removed (pulldown-cmark
+always adds one, and pasting it into a terminal would execute the command).
 
-## 表 (`wrapTable`、`ui/app.js`)
+## Tables (`wrapTable`, `ui/app.js`)
 
-`trustedHtml` が Markdown の `<table>` を `.table-scroll` で包む。窓より広い表は、このラッパーの
-中だけが横スクロールする (周りの文章と質問は動かない)。セルの背景は `--card`、見出しは
-`--table-head`、見出しは左揃え。
+`trustedHtml` wraps each Markdown `<table>` in `.table-scroll`. A table wider than the window
+scrolls horizontally only inside this wrapper (the surrounding text and questions do not move).
+Cell background is `--card`, headers use `--table-head`, and headers are left-aligned.
 
-## ローカルファイルの表示 (`media.rs`)
+## Displaying local files (`media.rs`)
 
-- **カスタム URI スキーム `askdown`** を `register_uri_scheme_protocol` で登録し、
-  Markdown ファイルのディレクトリ以下だけを返す。URL は macOS / Linux が
-  `askdown://localhost/<相対パス>`、Windows が `http://askdown.localhost/<相対パス>`
-  (`media::base_url`)。Tauri の asset protocol + scope でも書けるが、URL に絶対パスを
-  埋める必要があり、ディレクトリ境界の判定も自前で持ちたかったので自作した。
-- **境界は `resolve` の 1 箇所で守る。** `..` や絶対パスを含む要求は 403、`canonicalize` した
-  結果がディレクトリの外に出る (symlink) 場合も 403、無いファイルは 404。Markdown の
-  相対 URL を書き換える側 (`markdown::media_url`) は正規化しない (`..` は webview が URL を
-  解釈する時点で解決されるので、サーバーにはまず届かない)。判定はサーバーの 1 箇所だけ。
-- **守るのは「AI が書いた Markdown がディレクトリの外を指す」ことだけ。** 同じユーザーが
-  同じディレクトリで同時に symlink を差し替える TOCTOU や、外のファイルへの hard link は
-  ローカルツールの脅威モデル外 (そのユーザーは既にそのファイルを直接読み書きできる)。
-  Codex レビューで指摘されたが対応しない。
-- **`Range` ヘッダ (単一範囲) に対応する。** WKWebView は動画のシークで範囲要求を出す。
-  複数範囲はメディアプレイヤーが出さないので未対応。
-- **レスポンスに `Access-Control-Allow-Origin: *` を付ける。** ウィンドウのオリジン
-  (`tauri://localhost`) とは別オリジンなので、これが無いと `draw` の背景画像を描いた
-  canvas が tainted になり `toDataURL` が失敗する。フロントは `img.crossOrigin = "anonymous"`
-  で読む。実機で PNG の保存まで確認済み。
-- **Markdown 側の書き換えは ammonia の `UrlRelative::Custom`** (`markdown::Rewrite`)。
-  `href` / `src` / `<video poster>` に効く。質問の `src` はフロントが `DocumentView.media_base` を
-  前置する (`mediaUrl`。YAML の `src` はファイルパスなのでセグメントごとに
-  `encodeURIComponent` する。`#` や `%` を含む名前をそのまま通すため)。CSP の `img-src` /
-  `media-src` に両方の URL 形を入れてある。
-- **リンクは `open_link` コマンド → `open` crate** で http(s) だけ開く。Markdown は AI が
-  書くので `file:` や独自スキームは通さない。tauri-plugin-opener は同じ `open` を
-  permission 機構付きで包んだものなので、自前コマンド 1 つで足りる。
-- **動画は `loadedmetadata` で `currentTime = 0.001` にする** (`showFirstFrame`)。WebKit は
-  再生かシークをするまで 1 フレームも描かないので、クリックする対象が真っ黒になる。
+- **A custom URI scheme `askdown`** is registered with `register_uri_scheme_protocol` and serves
+  only files under the Markdown file's directory. URLs are `askdown://localhost/<relative path>` on
+  macOS / Linux and `http://askdown.localhost/<relative path>` on Windows (`media::base_url`).
+  Tauri's asset protocol + scope could do this too, but it requires embedding absolute paths in the
+  URL, and we wanted to own the directory-boundary check, so we built our own.
+- **The boundary is enforced in one place, `resolve`.** Requests containing `..` or an absolute
+  path get 403; if the `canonicalize`d result leaves the directory (symlink), also 403; a missing
+  file gets 404. The side that rewrites relative URLs in Markdown (`markdown::media_url`) does not
+  normalize (`..` is resolved when the webview interprets the URL, so it basically never reaches
+  the server). The check lives only in the server.
+- **The only thing defended against is "Markdown written by the AI pointing outside the
+  directory."** A TOCTOU where the same user swaps a symlink in the same directory concurrently, or
+  a hard link to a file outside, is outside the threat model of a local tool (that user can already
+  read and write that file directly). This was pointed out in a Codex review but will not be
+  addressed.
+- **`Range` headers (single range) are supported.** WKWebView issues range requests when seeking
+  in videos. Multiple ranges are not supported because media players do not issue them.
+- **Responses carry `Access-Control-Allow-Origin: *`.** The window's origin (`tauri://localhost`)
+  is a different origin, so without this the canvas on which a `draw` background image is drawn
+  becomes tainted and `toDataURL` fails. The frontend loads with `img.crossOrigin = "anonymous"`.
+  Verified on a real machine all the way to saving the PNG.
+- **Rewriting on the Markdown side uses ammonia's `UrlRelative::Custom`** (`markdown::Rewrite`).
+  It applies to `href` / `src` / `<video poster>`. For a question's `src`, the frontend prepends
+  `DocumentView.media_base` (`mediaUrl`. The YAML `src` is a file path, so each segment is
+  `encodeURIComponent`-ed, so names containing `#` or `%` pass through as is). Both URL forms are
+  included in the CSP's `img-src` / `media-src`.
+- **Links open via the `open_link` command → the `open` crate**, http(s) only. Markdown is written
+  by an AI, so `file:` and custom schemes are not let through. tauri-plugin-opener is the same
+  `open` wrapped with a permission mechanism, so a single command of our own is enough.
+- **Videos set `currentTime = 0.001` on `loadedmetadata`** (`showFirstFrame`). WebKit does not draw
+  a single frame until playback or a seek, so the thing to click on would be pitch black.
 
-## 質問の種類とフロント (`ui/app.js`)
+## Question types and the frontend (`ui/app.js`)
 
-renderer は「`collect` を返す」か「`{ collect, drawing }` を返す」。`collect` は同期で、
-回答 / `null` (未回答) / 例外 (不正な入力。メッセージをステータス行に出す) のいずれか。
-`drawing` は保存する PNG (data URL) を返し、`submit` の `drawings` に載せる。
+A renderer returns either "`collect`" or "`{ collect, drawing }`". `collect` is synchronous and
+returns an answer, `null` (unanswered), or throws (invalid input; the message is shown in the status
+line). `drawing` returns the PNG (data URL) to save, which is put into `drawings` of `submit`.
 
-- `media-choice`: 画像はクリックで選択、動画・音声はコントロールがあるのでキャプションで
-  選ぶ (カード全体を `<label>` にすると再生ボタンで選択が切り替わる)。
-- `point`: 動画は native controls を出さず、自前の再生ボタン + シークバー (`videoControls`)。
-  controls を出すとフレームの上の overlay がコントロールを塞ぐか、コントロールのクリックが
-  点になる。マーカーは比率 (`rx` / `ry`) で置くので表示サイズに依らず前回回答を復元できる。
-- `draw`: ストロークを配列で持ち、Undo は配列から外して描き直す。前回回答がある時は
-  その PNG (背景込み) を背景にして上書きし、何も描かなければ前回回答をそのまま返す。
-  背景無しは白で塗る (透過 PNG は黒く見えるビューアが多い)。背景の読込中は描画も送信も
-  受け付けない (canvas は仮サイズなので座標がずれる)。読込に失敗したら白紙に切り替えず、
-  required なら送信を止め、任意なら未回答にする (背景無しの絵は別の質問への回答になる)。
-  PNG は `submit` の `drawings` に同梱し、Rust が書く (下記「描画の保存」)。
-- `color`: `<input type=color>` は必ず値を持つので、テキスト欄を正とし、空なら未回答。
-- `src` が無い `point` のように入力を作れない質問は `unusable` で表示し、`required` なら
-  submit を止める (そうしないと必須のまま未回答で正常終了できる)。
-- `range`: ytyng-blog のサビ選択ウィジェットに倣い、native controls + 「Use current time」+
-  ±0.1 / ±0.5 のナッジ + 区間再生 (`timeupdate` で `end` に達したら pause)。
-  負数・`end <= start`・長さ超え・長さ未取得は例外で弾く。
-- YAML の `src` と回答の `path` はファイルパスで URL ではない。`#` / `?` / `:` を含む名前も
-  そのまま扱う (`mediaUrl` はスキーム判定をせず常にパスとしてエンコードし、`mediaKind` は
-  末尾の拡張子だけを見る)。
-- `point` の復元した値は送信時に検証する: `rx` / `ry` は 0..1、動画の `time` は 0..長さ
-  (手で編集された回答や、差し替えで短くなった動画の外を指す点を出さない)。
+- `media-choice`: images are selected by clicking; videos and audio have controls, so they are
+  selected via the caption (making the whole card a `<label>` would toggle selection when the play
+  button is pressed).
+- `point`: videos do not show native controls; they use our own play button + seek bar
+  (`videoControls`). With controls shown, either the overlay on top of the frame blocks the
+  controls, or clicks on the controls become points. Markers are placed by ratio (`rx` / `ry`), so
+  the previous answer can be restored regardless of display size.
+- `draw`: strokes are kept in an array, and Undo removes one from the array and redraws. When there
+  is a previous answer, its PNG (including background) is used as the background and drawn over; if
+  nothing is drawn, the previous answer is returned as is. With no background, it is filled white
+  (many viewers show transparent PNGs as black). While the background is loading, neither drawing
+  nor submitting is accepted (the canvas has a provisional size, so coordinates would be off). If
+  loading fails, it does not switch to a blank canvas; if required, submission is blocked, and if
+  optional, it becomes unanswered (a drawing without the background would be an answer to a
+  different question). The PNG is bundled into `drawings` of `submit` and Rust writes it (see
+  "Saving drawings" below).
+- `color`: `<input type=color>` always has a value, so the text field is the source of truth, and
+  empty means unanswered.
+- A question for which no input can be built, such as a `point` without `src`, is shown as
+  `unusable`, and if `required`, submit is blocked (otherwise it could exit successfully with a
+  required question unanswered).
+- `range`: modeled after ytyng-blog's chorus-selection widget: native controls + "Use current time"
+  + ±0.1 / ±0.5 nudges + range playback (pause when `timeupdate` reaches `end`).
+  Negative numbers, `end <= start`, exceeding the duration, and an unknown duration are rejected by
+  throwing.
+- The YAML `src` and the answer's `path` are file paths, not URLs. Names containing `#` / `?` / `:`
+  are handled as is (`mediaUrl` does no scheme detection and always encodes as a path, and
+  `mediaKind` looks only at the trailing extension).
+- Restored `point` values are validated on submit: `rx` / `ry` in 0..1, and a video's `time` in
+  0..duration (so that hand-edited answers, or points outside a video that got shorter after being
+  replaced, are not emitted).
 
-## 描画の保存 (`gui::commit`、`session::stage_file` / `commit_file`)
+## Saving drawings (`gui::commit`, `session::stage_file` / `commit_file`)
 
-Markdown が記録の正本なので、絵は「その絵を指す回答が書かれた後」にだけ置き換える。順序は
-一時ファイルに書く (`stage_file`、`create_new` で未使用の短い名前を取る) → Markdown を保存
-(`Session::save`。保存直前の内容を返す) → 既存ファイルを退避してから rename (`commit_file` →
-`Replaced`)。失敗時は Markdown を `restore` で保存前に戻し、差し替え済みの絵を `undo` で戻す。
-保存後に外部編集があって Markdown を戻せない時は、書いた回答が残るので絵も戻さず、エラーに
-その旨を書く。全部成功したら退避分を `finish` で消す。保存先がディレクトリなら stage の時点で
-弾く (rename で置き換えられない唯一の現実的なケース)。rename は既存の symlink / hard link を
-辿らず差し替える。`--no-write` でも PNG は書く (それが回答なので)。
+The Markdown is the authoritative record, so a picture is replaced only "after the answer pointing
+to that picture has been written." The order is: write to a temporary file (`stage_file`, taking an
+unused short name with `create_new`) → save the Markdown (`Session::save`, which returns the content
+just before saving) → move the existing file aside, then rename (`commit_file` → `Replaced`). On
+failure, the Markdown is restored to its pre-save state with `restore`, and already-replaced
+pictures are put back with `undo`. If an external edit happened after saving and the Markdown cannot
+be restored, the written answer remains, so the pictures are not put back either, and the error says
+so. When everything succeeds, the moved-aside files are deleted with `finish`. If the destination is
+a directory, it is rejected at stage time (the only realistic case where rename cannot replace it).
+rename replaces existing symlinks / hard links without following them. PNGs are written even with
+`--no-write` (because they are the answer).
 
-ファイル名は `drawing_file_name`: `<md の stem>.<id>.png`。id は小文字の英数字と `-_` 以外を
-`_` に落とし、変わった場合 (大文字を含む場合も。case-insensitive FS で衝突するため) は元の id の
-FNV ハッシュ 16 桁を `.` で付ける。200 バイトを超える名前は stem / id を 64 バイトに切り詰めて
-全体のハッシュを付ける。
+The file name is `drawing_file_name`: `<md stem>.<id>.png`. In the id, anything other than lowercase
+alphanumerics and `-_` is reduced to `_`, and if it changed (including when it contains uppercase,
+because it would collide on a case-insensitive FS), a 16-digit FNV hash of the original id is
+appended after a `.`. For names over 200 bytes, the stem / id are truncated to 64 bytes and a hash of
+the whole is appended.
 
-## 回答の形 (JSON)
+## Answer shape (JSON)
 
-README の表が正。追加・変更したら README と `examples/media.md` も直す。
+The table in the README is authoritative. When adding or changing anything, also update the README
+and `examples/media.md`.
 
-## CI とリリース
+## CI and releases
 
-`.github/workflows/test.yml` が PR のチェックで、`release.yml` から `uses:` で呼ばれて
-リリースの門番にもなる (呼ばれた job は呼び出し元の run に入るので `needs` が効く)。
-macOS と Ubuntu の両方で clippy (`-D warnings`) とテストを回す。Ubuntu には apt で
-webkit2gtk 4.1 を入れる (askdown は GUI 専用で feature 分割が無い)。
+`.github/workflows/test.yml` is the PR check, and it is also called from `release.yml` via `uses:`
+to act as the release gatekeeper (a called job joins the caller's run, so `needs` works).
+It runs clippy (`-D warnings`) and tests on both macOS and Ubuntu. On Ubuntu, webkit2gtk 4.1 is
+installed with apt (askdown is GUI-only and has no feature split).
 
-**`Cargo.toml` の version を main で変えると、それがリリースになる。** `release.yml` は
-main への push すべてで起動し、その version の Release が公開済みか (404 だけを「未公開」と
-読む) で判断する。何度実行しても安全で、失敗したリリースは原因を直して push すれば続きになる。
-`scripts/release.sh [patch|minor|major]` は version を 3 箇所 (workspace の `version`、
-`askdown-core` 依存の `version`、`tauri.conf.json`) + `Cargo.lock` で上げて push する薄い
-スクリプト。
+**Changing the version in `Cargo.toml` on main makes a release.** `release.yml` runs on every push
+to main and decides based on whether a Release for that version is already published (only a 404 is
+read as "unpublished"). It is safe to run any number of times, and a failed release continues when
+you fix the cause and push.
+`scripts/release.sh [patch|minor|major]` is a thin script that bumps the version in 3 places (the
+workspace `version`, the `version` of the `askdown-core` dependency, and `tauri.conf.json`) +
+`Cargo.lock` and pushes.
 
-- macOS は arm64 のみ、Developer ID 署名 + 公証 (secrets `APPLE_*` は投入済み)。素の
-  バイナリは staple できないので Gatekeeper がオンラインでチケットを引く。
-- Linux は x86_64、webkit2gtk 4.1 に動的リンクしたバイナリ (実行環境に要る。README に記載)。
-- Release は draft で作ってアセット数 (2) を数えてから公開する。
-- Homebrew cask はこのリポジトリでは触らない。`cyberneura/homebrew-tap` の workflow が毎時
-  最新 Release を見て `Casks/askdown.rb` を更新する (cask の `binary` パスはアーカイブ内の
-  ディレクトリ名 `askdown-v<version>-aarch64-apple-darwin/askdown` に揃える)。
-- crates.io はリポジトリ変数 `PUBLISH_CRATES=true` と secret `CARGO_REGISTRY_TOKEN` で
-  有効化する (未設定)。「push で続きになる」のは GitHub Release までで、Release 公開後に
-  `crates` job だけが失敗した場合は `plan` が「公開済み」と判定して何もしない。その時は
-  Actions の「failed jobs を再実行」で `crates` を回す。`askdown` クレートの publish は `--no-verify` (tauri-build が
-  `gen/schemas/` をソースに書くので検証ビルドが拒否される)。
+- macOS is arm64 only, with Developer ID signing + notarization (secrets `APPLE_*` are already set).
+  A bare binary cannot be stapled, so Gatekeeper fetches the ticket online.
+- Linux is x86_64, a binary dynamically linked against webkit2gtk 4.1 (required at runtime;
+  documented in the README).
+- The Release is created as a draft and published after counting the assets (2).
+- Do not touch the Homebrew cask in this repository. A workflow in `cyberneura/homebrew-tap` checks
+  the latest Release hourly and updates `Casks/askdown.rb` (the cask's `binary` path matches the
+  directory name inside the archive, `askdown-v<version>-aarch64-apple-darwin/askdown`).
+- crates.io is enabled with the repository variable `PUBLISH_CRATES=true` and the secret
+  `CARGO_REGISTRY_TOKEN` (not set). "A push continues it" holds only up to the GitHub Release; if
+  only the `crates` job fails after the Release is published, `plan` judges it "already published"
+  and does nothing. In that case, run `crates` with "Re-run failed jobs" in Actions. The `askdown`
+  crate is published with `--no-verify` (tauri-build writes `gen/schemas/` into the source, so the
+  verification build is rejected).
 
-## ライセンス表示
+## License notices
 
-`THIRD-PARTY-NOTICES.txt` は `scripts/generate-third-party-notices.sh` (cargo-about、
-`about.toml`) で生成し、`crates/askdown-cli/` からの symlink 越しに `notices.rs` が
-`include_str!` する (`askdown --license`)。`tests/third_party_notices.rs` が Cargo.lock と
-突き合わせるので、依存を足したり上げたりしたら再生成してコミットする。
+`THIRD-PARTY-NOTICES.txt` is generated by `scripts/generate-third-party-notices.sh` (cargo-about,
+`about.toml`), and `notices.rs` `include_str!`s it through a symlink from `crates/askdown-cli/`
+(`askdown --license`). `tests/third_party_notices.rs` checks it against Cargo.lock, so when you add
+or bump dependencies, regenerate it and commit.
 
-## 検証
+## Verification
 
 ```sh
 cargo test
 cargo clippy --all-targets
 cargo run -p askdown -- --list examples/media.md
-cargo run -p askdown -- examples/media.md   # ウィンドウが開く
+cargo run -p askdown -- examples/media.md   # opens a window
 ```
 
-examples の Markdown を直接答えると書き戻しで変更されるので、/tmp にコピーして試す
-(`draw` は PNG も隣に書く)。
+Answering the examples' Markdown directly modifies them through write-back, so copy them to /tmp to
+try them (`draw` also writes a PNG next to it).
 
-**実機 (macOS) の E2E は orca computer-use で回せる。** `orca computer get-app-state --app askdown`
-で webview の DOM がアクセシビリティツリーに出るので、element-index で click できる。
-落とし穴:
+**E2E on a real machine (macOS) can be run with orca computer-use.**
+`orca computer get-app-state --app askdown` exposes the webview's DOM in the accessibility tree, so
+you can click by element-index.
+Pitfalls:
 
-- `set-value` は `<input type=number>` に効かない (`value_not_settable`)。ボタン (Use current
-  time / ナッジ) をクリックして値を入れる。
-- `drag` は pointermove を配送しない (pointerdown / up だけ届くので点が 1 つ打たれる)。
-  ストロークの検証は手で行うか、ブラウザにスタブで読ませる。
-- 要素を追加する操作 (マーカーを置く等) で element-index がずれる。操作のたびに取り直す。
-- 画面の下の方は `click` が自動でスクロールして見せる。座標クリックの前に screenshot を
-  取り直し、その間にスクロールしない。
+- `set-value` does not work on `<input type=number>` (`value_not_settable`). Click the buttons (Use
+  current time / nudges) to enter values.
+- `drag` does not deliver pointermove (only pointerdown / up arrive, so a single point is placed).
+  Verify strokes by hand, or have a browser load it with stubs.
+- Operations that add elements (placing a marker, etc.) shift the element-index. Re-fetch it after
+  every operation.
+- For the lower part of the screen, `click` scrolls automatically to show it. Re-take the screenshot
+  before a coordinate click, and do not scroll in between.
 
-## アプリアイコン
+## App icon
 
-白の疑問符に紫のグラデーション。**手で描かずに `scripts/generate-icon.py` で生成する**
-(標準ライブラリだけで動く。このリポジトリに画像ツールチェーンは無く、アセット 1 枚のために
-足す価値も無い)。スクリプトが `resources/app-icons/mac-original.png`、その複製の
-`crates/askdown-cli/icons/icon.png` (`tauri.conf.json` の `bundle.icon`)、
-`resources/app-icons/layout.json` の 3 つを書く。layout.json の glyph 矩形は描いた図形から
-計算するので、手で測って原画像とずれることがない。同じソースから同じ画素が出るが、バイト列
-までは一致しない (zlib の実装差で圧縮結果が、libm の差で丸めが変わりうる)。再生成の正否は
-`cmp` や git diff ではなく `python3 scripts/generate-icon.py --check` で見る (画素をチャネル差
-±1 で比較。`.github/workflows/macos-icons.yml` も同じ)。
+A white question mark on a purple gradient. **Do not draw it by hand; generate it with
+`scripts/generate-icon.py`** (runs with the standard library only. This repository has no image
+toolchain, and adding one for a single asset is not worth it). The script writes 3 files:
+`resources/app-icons/mac-original.png`, its copy `crates/askdown-cli/icons/icon.png`
+(`bundle.icon` in `tauri.conf.json`), and `resources/app-icons/layout.json`. The glyph rectangle in
+layout.json is computed from the drawn shapes, so it never drifts from the original image the way a
+hand measurement could. The same source produces the same pixels, but not identical bytes
+(differences in zlib implementations can change the compressed output, and libm differences can
+change rounding). Check whether a regeneration is correct not with `cmp` or git diff but with
+`python3 scripts/generate-icon.py --check` (compares pixels with a per-channel tolerance of ±1;
+`.github/workflows/macos-icons.yml` does the same).
 
-図柄は signed distance function (円弧 + カプセルの縦棒 + 点) で描き、角丸四角の本体は
-macOS のテンプレート寸法 (1024 のキャンバスに 824 の本体、角丸 22.5%) を定数で持つ。
-図柄は白、地は赤成分の低い色にする。サイズ別画像の生成 (`prepare-macos-icons.swift`) が
-図柄のアルファを「各画素の赤成分が地よりどれだけ高いか」から復元するため、色付きの図柄や
-赤の強い地では壊れる。
+The glyph is drawn with signed distance functions (arc + capsule stem + dot), and the rounded-square
+body uses the macOS template dimensions as constants (an 824 body on a 1024 canvas, 22.5% corner
+radius). The glyph is white, and the background is a color with a low red component. The per-size
+image generation (`prepare-macos-icons.swift`) recovers the glyph's alpha from "how much higher each
+pixel's red component is than the background's," so a colored glyph or a strongly red background
+breaks it.
 
-図柄や色を変えたらスクリプトを直して再生成し、`bash scripts/generate-macos-icons.sh`
-(macOS + Xcode) でサイズ別 PNG・ICNS・Assets.car へ反映する。寸法の詳細と検証コマンドは
-`resources/app-icons/README.md`。16pt / 32pt の @1x は背景がキャンバスの端まで届き、図柄を
-中央 80% に収める。それより大きいサイズは外側に 10% の余白を取る。生成した ICNS を
-`tauri icon` / `iconutil` で作り直さない (小サイズの ARGB 格納と、対応する Assets.car /
-CFBundleIconName の登録が失われる)。ネイティブ描画は `macos-icons.yml` が検証する。
+When you change the glyph or colors, fix the script and regenerate, then run
+`bash scripts/generate-macos-icons.sh` (macOS + Xcode) to propagate to per-size PNGs, ICNS, and
+Assets.car. Dimension details and verification commands are in `resources/app-icons/README.md`.
+At 16pt / 32pt @1x the background reaches the edge of the canvas and the glyph fits within the
+central 80%. Larger sizes keep a 10% margin on the outside. Do not rebuild the generated ICNS with
+`tauri icon` / `iconutil` (that loses the ARGB storage of small sizes and the corresponding
+Assets.car / CFBundleIconName registration). Native rendering is verified by `macos-icons.yml`.
 
-配布するのは素の実行ファイルなので、GUI が ICNS を埋め込み (`gui.rs` の `include_bytes!`)
-起動時に NSApplication のアイコンに設定する。バンドル登録は任意の .app ビルドにだけ効き、
-素のバイナリにシステム設定のアイコンを与えることはできない。
+What we distribute is a bare executable, so the GUI embeds the ICNS (`include_bytes!` in `gui.rs`)
+and sets it as the NSApplication icon at launch. Bundle registration only affects an arbitrary .app
+build; a bare binary cannot be given a system-settings icon.
 
-## 未実装
+## Not implemented
 
-- Linux の実機確認 (CI では Ubuntu で clippy とテストを通しているだけ)。Windows は CI にも
-  入っていない (`media::base_url` の `http://askdown.localhost/` 形は未検証)
+- Verification on a real Linux machine (CI only runs clippy and tests on Ubuntu). Windows is not even
+  in CI (the `http://askdown.localhost/` form of `media::base_url` is unverified)
